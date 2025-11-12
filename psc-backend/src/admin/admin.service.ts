@@ -122,13 +122,38 @@ export class AdminService {
     };
   }
 
-  async searchMembers(searchFor: string){
-    return await this.prismaService.member.findMany({where: {
-      OR: [
-        {Membership_No: {startsWith: searchFor}},
-        {Name: {startsWith: searchFor}}
-      ]
-    }, select: {Name: true, Balance: true, Membership_No: true, Status: true, Sno: true}})
+  async searchMembers(searchFor: string) {
+    // Trim and avoid empty or too short searches
+    const query = searchFor.trim();
+    if (!query) return [];
+
+    return await this.prismaService.member.findMany({
+      where: {
+        OR: [
+          {
+            Membership_No: {
+              startsWith: query,
+            },
+          },
+          {
+            Name: {
+              startsWith: query,
+            },
+          },
+        ],
+      },
+      select: {
+        Name: true,
+        Balance: true,
+        Membership_No: true,
+        Status: true,
+        Sno: true,
+      },
+      orderBy: {
+        Membership_No: 'asc',
+      },
+      take: 15,
+    });
   }
 
   async getAdmins() {
@@ -155,7 +180,7 @@ export class AdminService {
 
   async getRoomTypes() {
     return await this.prismaService.roomType.findMany({
-      select: {type: true, id: true},
+      select: { type: true, id: true },
       orderBy: { priceGuest: 'asc' },
     });
   }
@@ -172,10 +197,14 @@ export class AdminService {
     });
   }
   async getRoomCategories() {
-    return await this.prismaService.roomType.findMany({orderBy: {createdAt: "desc"}})
+    return await this.prismaService.roomType.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
   }
   async getAvailRooms(roomTypeId: number) {
-    return await this.prismaService.room.findMany({where:{roomTypeId},
+    // console.log(roomTypeId);
+    return await this.prismaService.room.findMany({
+      where: { roomTypeId },
       include: {
         roomType: {
           select: { type: true, priceMember: true, priceGuest: true },
@@ -197,7 +226,7 @@ export class AdminService {
     });
   }
 
-  async updateRoom(payload: RoomDto) {
+  async updateRoom(payload: Partial<RoomDto>) {
     if (!payload.id)
       throw new HttpException('Room ID is required', HttpStatus.BAD_REQUEST);
 
@@ -223,10 +252,11 @@ export class AdminService {
       orderBy: { createdAt: 'desc' },
     });
   }
-  async getAvailHalls(){
+  async getAvailHalls() {
     return await this.prismaService.hall.findMany({
-      where: {isActive: true, isBooked: false}, orderBy: {createdAt: "desc"}
-    })
+      where: { isActive: true, isBooked: false },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async createHall(payload: HallDto) {
@@ -271,7 +301,10 @@ export class AdminService {
     return await this.prismaService.lawnCategory.findMany({});
   }
   async getLawnNames(id: number) {
-    return await this.prismaService.lawn.findMany({where:{lawnCategoryId: id}});
+    return await this.prismaService.lawn.findMany({
+      where: { lawnCategoryId: id },
+      orderBy: {memberCharges: "desc"}
+    });
   }
 
   async createLawnCategory(payload: LawnCategory) {
@@ -315,6 +348,7 @@ export class AdminService {
 
   async getLawns() {
     return this.prismaService.lawn.findMany({
+      where: {isBooked: false},
       include: { lawnCategory: { select: { id: true, category: true } } },
       orderBy: { createdAt: 'desc' },
     });
@@ -435,5 +469,4 @@ export class AdminService {
   async deleteSport(payload) {
     console.log(payload);
   }
-
 }

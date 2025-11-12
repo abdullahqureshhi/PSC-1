@@ -11,7 +11,6 @@ import {
 const LawnCategoryModal = ({ onClose, categories, queryClient }) => {
   const [form, setForm] = useState({ id: null, category: "" });
   const [error, setError] = useState("");
-//   console.log(categories)
 
   const createMutation = useMutation({
     mutationFn: createLawnCategory,

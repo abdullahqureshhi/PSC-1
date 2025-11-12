@@ -128,7 +128,7 @@ function Rooms() {
             onSubmit={handleSubmit}
             error={error}
             setError={setError}
-            roomTypes={roomTypes}
+            roomTypes={roomTypes.data}
           />
         )}
       </AnimatePresence>

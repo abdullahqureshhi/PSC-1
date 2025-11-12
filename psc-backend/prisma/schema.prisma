@@ -47,8 +47,8 @@ model Member {
   sportsSubscriptions SportSubscription[]
 
   totalBookings Int @default(0)
-  drAmount Decimal @default(0.00) @db.Decimal(12, 0)
-  crAmount Decimal @default(0.00) @db.Decimal(12, 0)
+  drAmount Decimal @default(0.00) @db.Decimal(12, 2)
+  crAmount Decimal @default(0.00) @db.Decimal(12, 2)
   lastBookingDate DateTime?
 
   vouchers PaymentVoucher[]
@@ -66,18 +66,17 @@ enum PaymentStatus {
 }
 
 model RoomBooking {
-  id         Int      @id @default(autoincrement())
-  Membership_No   String
-  roomId     Int
-  checkIn    DateTime
-  checkOut   DateTime
+  id            Int           @id @default(autoincrement())
+  Membership_No String
+  roomId        Int
+  checkIn       DateTime
+  checkOut      DateTime
 
-  totalPrice Decimal  @default(0.00) @db.Decimal(30, 2)
+  totalPrice    Decimal       @default(0.00) @db.Decimal(30, 2)
   paymentStatus PaymentStatus @default(UNPAID)
-  pricingType String
-  paidAmount  Decimal @db.Decimal(30,2) @default(0.00)
-  pendingAmount Decimal @db.Decimal(30,2) @default(0.00)
-
+  pricingType   String
+  paidAmount    Decimal       @db.Decimal(30,2) @default(0.00)
+  pendingAmount Decimal       @db.Decimal(30,2) @default(0.00)
 
   member Member @relation(fields: [Membership_No], references: [Membership_No])
   room   Room   @relation(fields: [roomId], references: [id])
@@ -86,12 +85,25 @@ model RoomBooking {
   updatedAt DateTime @updatedAt
 }
 
+enum BookingOpt {
+  MORNING
+  EVENING
+  NIGHT
+}
+
 model HallBooking {
-  id          Int      @id @default(autoincrement())
-  memberId    Int
-  hallId      Int
-  bookingDate DateTime
-  totalPrice  Decimal  @default(0.00) @db.Decimal(30, 2)
+  id            Int           @id @default(autoincrement())
+  memberId      Int
+  hallId        Int
+  bookingDate   DateTime
+  totalPrice    Decimal       @default(0.00) @db.Decimal(30, 2)
+  paymentStatus PaymentStatus @default(UNPAID)
+  pricingType   String
+  paidAmount    Decimal       @db.Decimal(30,2) @default(0.00)
+  pendingAmount Decimal       @db.Decimal(30,2) @default(0.00)
+  eventType String @db.VarChar(255)
+
+  bookingTime BookingOpt @default(NIGHT)
 
   member Member @relation(fields: [memberId], references: [Sno])
   hall   Hall   @relation(fields: [hallId], references: [id])
@@ -101,12 +113,16 @@ model HallBooking {
 }
 
 model LawnBooking {
-  id          Int      @id @default(autoincrement())
-  memberId    Int
-  lawnId      Int
-  bookingDate DateTime
-  guestsCount Int
-  totalPrice  Decimal  @default(0.00) @db.Decimal(30, 2)
+  id            Int           @id @default(autoincrement())
+  memberId      Int
+  lawnId        Int
+  bookingDate   DateTime
+  guestsCount   Int
+  totalPrice    Decimal       @default(0.00) @db.Decimal(30, 2)
+  paymentStatus PaymentStatus @default(UNPAID)
+  pricingType   String
+  paidAmount    Decimal       @db.Decimal(30,2) @default(0.00)
+  pendingAmount Decimal       @db.Decimal(30,2) @default(0.00)
 
   member Member @relation(fields: [memberId], references: [Sno])
   lawn   Lawn   @relation(fields: [lawnId], references: [id])
@@ -116,11 +132,15 @@ model LawnBooking {
 }
 
 model PhotoshootBooking {
-  id           Int      @id @default(autoincrement())
-  memberId     Int
-  photoshootId Int
-  bookingDate  DateTime
-  totalPrice   Decimal  @default(0.00) @db.Decimal(30, 2)
+  id            Int           @id @default(autoincrement())
+  memberId      Int
+  photoshootId  Int
+  bookingDate   DateTime
+  totalPrice    Decimal       @default(0.00) @db.Decimal(30, 2)
+  paymentStatus PaymentStatus @default(UNPAID)
+  pricingType   String
+  paidAmount    Decimal       @db.Decimal(30,2) @default(0.00)
+  pendingAmount Decimal       @db.Decimal(30,2) @default(0.00)
 
   member     Member     @relation(fields: [memberId], references: [Sno])
   photoshoot Photoshoot @relation(fields: [photoshootId], references: [id])

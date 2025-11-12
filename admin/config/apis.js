@@ -199,10 +199,10 @@ export const searchMembers = async (searchString) => {
 };
 
 // Bookings
-export const getBookings = async () => {
+export const getBookings = async (bookingsFor) => {
   try {
     const response = await axios.get(
-      `${base_url}/admin/get/bookings/all`,
+      `${base_url}/admin/get/bookings/all?bookingsFor=${bookingsFor}`,
       { withCredentials: true }
     );
     return response.data;
@@ -216,15 +216,15 @@ export const getBookings = async () => {
     throw { message, status: error.response?.status || 500 };
   }
 };
-
 export const createBooking = async (data) => {
+  console.log(data)
   try {
     const response = await axios.post(
       `${base_url}/admin/create/booking`,
       data,
       { withCredentials: true }
     );
-    return response;
+    return response.data;
   } catch (error) {
     console.log(error)
     const message =
@@ -463,7 +463,7 @@ export const getLawnCategoriesNames = async (catId) => {
     const response = await axios.get(`${base_url}/admin/get/lawn/categories/names?catId=${catId}`, {
       withCredentials: true,
     });
-    return response;
+    return response.data;
   } catch (error) {
     const message =
       error.response?.data?.message ||
@@ -479,7 +479,7 @@ export const getLawnCategories = async () => {
     const response = await axios.get(`${base_url}/admin/get/lawn/categories`, {
       withCredentials: true,
     });
-    return response;
+    return response.data;
   } catch (error) {
     const message =
       error.response?.data?.message ||
@@ -566,12 +566,12 @@ export const createLawn = async (data) => {
     throw { message, status: error.response?.status || 500 };
   }
 };
-export const getAvailableLawns = async () => {
+export const getAvailableLawns = async (catId) => {
   try {
-    const response = await axios.get(`${base_url}/admin/get/lawns`, {
+    const response = await axios.get(`${base_url}/admin/get/lawns/available?catId=${catId}`, {
       withCredentials: true,
     });
-    return response.data;
+    return response;
   } catch (error) {
     const message =
       error.response?.data?.message ||

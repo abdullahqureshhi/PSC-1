@@ -30,9 +30,15 @@ export class BookingDto{
     @IsOptional()
     bookingDate?: string | null
     @IsOptional()
+    eventType?: string | null
+    @IsOptional()
+    eventTime?: string | null
+    @IsOptional()
     timeSlot?: string | null
     @IsOptional()
     photoshootTime?: string | null
+    @IsOptional()
+    guestsCount?: string | null
     
     @IsNotEmpty({message: "Total Price must be specified"})
     totalPrice: string
@@ -40,11 +46,13 @@ export class BookingDto{
     paymentStatus: PaymentStatus
     @IsNotEmpty({message: "Pricing type either be Member or Guest"})
     pricingType: string
-    @IsOptional({message: "Paid amount must be specified"})
+    @IsOptional()
     paidAmount: string | number
     @IsNotEmpty({message: "Pending amount must be specified"})
     pendingAmount: string |number
     @IsEnum(PaymentMode, {message: "payment mode must be provided"})
     paymentMode: PaymentMode
+    @IsOptional()
+    prevRoomId?:string|null
 
 }

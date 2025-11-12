@@ -7,9 +7,10 @@ import {
   CalendarPlus,
   Users,
   DollarSign,
-  CheckCircle,
-  XCircle,
   Clock,
+  Camera,
+  Trees,
+  Building,
 } from "lucide-react";
 import throttle from "lodash/throttle";
 import { useQuery } from "@tanstack/react-query";
@@ -19,7 +20,8 @@ import {
   getAvailRooms,
   getHallTypes,
   getLawnCategories,
-  getLawnCategoriesNames,
+  getAvailableLawns,
+  getPhotoshoots,
 } from "../../../config/apis";
 
 const selectStyles = {
@@ -39,8 +41,8 @@ const selectStyles = {
     backgroundColor: state.isSelected
       ? "#f59e0b"
       : state.isFocused
-      ? "#2a2a2a"
-      : "#1f1f1f",
+        ? "#2a2a2a"
+        : "#1f1f1f",
     color: state.isSelected ? "black" : "white",
     opacity: state.data.isBooked ? 0.6 : 1,
     cursor: state.data.isBooked ? "not-allowed" : "pointer",
@@ -53,26 +55,68 @@ const selectStyles = {
 export default function BookingModal({ onClose, onSubmit, error, setError, booking }) {
   const isEdit = !!booking;
 
-  const [formData, setFormData] = useState({
-    membershipNo: booking?.Membership_No || "",
-    category: booking?.category || "",
-    subCategoryId: booking?.subCategoryId || "",
-    entityId: booking?.entityId || "",
-    checkIn: booking?.checkIn ? booking.checkIn.split("T")[0] : "",
-    checkOut: booking?.checkOut ? booking.checkOut.split("T")[0] : "",
-    bookingDate: booking?.bookingDate ? booking.bookingDate.split("T")[0] : "",
-    timeSlot: booking?.timeSlot || "",
-    photoshootTime: booking?.photoshootTime || "",
-    totalPrice: booking?.totalPrice || "",
-    paymentStatus: booking?.paymentStatus || "UNPAID",
-    pricingType: booking?.pricingType || "member",
-    paidAmount: booking?.paidAmount || "",
-    pendingAmount: booking?.pendingAmount || "",
-  });
+  /* ==================== INITIAL FORM ==================== */
+  const initialFormData = useMemo(() => {
+    if (!isEdit) {
+      return {
+        membershipNo: "",
+        category: "",
+        subCategoryId: "",
+        entityId: "",
+        checkIn: "",
+        checkOut: "",
+        eventTime: "",
+        eventType: "",
+        bookingDate: "",
+        timeSlot: "",
+        photoshootTime: "",
+        guestsCount: "",
+        totalPrice: "",
+        paymentStatus: "UNPAID",
+        pricingType: "member",
+        paidAmount: "",
+        pendingAmount: "",
+      };
+    }
 
-  const [searchQuery, setSearchQuery] = useState("");
+    const normalizeDate = (date) => (date ? new Date(date).toISOString().split("T")[0] : "");
 
-  /* ==================== MEMBERS ==================== */
+    // Detect category from booking
+    let category = "Room";
+    if (booking.hallId) category = "Hall";
+    else if (booking.lawnId) category = "Lawn";
+    else if (booking.photoshootId) category = "Photoshoot";
+
+    return {
+      membershipNo: booking.Membership_No || "",
+      category,
+      subCategoryId:
+        booking.room?.roomType?.id?.toString() ||
+        booking.hall?.hallType?.id?.toString() ||
+        booking.lawn?.lawnCategory?.id?.toString() ||
+        "",
+      entityId:
+        (booking.roomId || booking.hallId || booking.lawnId || booking.photoshootId)?.toString() || "",
+      checkIn: category === "Room" ? normalizeDate(booking.checkIn) : "",
+      checkOut: category === "Room" ? normalizeDate(booking.checkOut) : "",
+      bookingDate: category !== "Room" ? normalizeDate(booking.bookingDate) : "",
+      eventTime: booking.eventTime || "",
+      eventType: booking.eventType || "",
+      timeSlot: booking.timeSlot || "",
+      photoshootTime: booking.photoshootTime || "",
+      guestsCount: booking.guestsCount?.toString() || "",
+      totalPrice: booking.totalPrice?.toString() || "",
+      paymentStatus: booking.paymentStatus || "UNPAID",
+      pricingType: booking.pricingType || "member",
+      paidAmount: booking.paidAmount?.toString() || "",
+      pendingAmount: booking.pendingAmount?.toString() || "",
+    };
+  }, [isEdit, booking]);
+
+  const [formData, setFormData] = useState(initialFormData);
+  const [searchQuery, setSearchQuery] = useState(isEdit ? booking?.Membership_No || "" : "");
+
+  /* ==================== MEMBER SEARCH ==================== */
   const { data: members = [], isFetching: isLoadingMembers } = useQuery({
     queryKey: ["members", searchQuery],
     queryFn: async () => {
@@ -85,8 +129,6 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
       }));
     },
     enabled: !!searchQuery,
-    staleTime: 60_000,
-    cacheTime: 300_000,
   });
 
   const loadMembers = useCallback(
@@ -100,24 +142,25 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
     [members]
   );
 
-  /* ==================== ROOM ==================== */
-  const { data: roomTypes = [], isFetching: loadingRoomTypes } = useQuery({
+  /* ==================== FETCH DATA PER CATEGORY ==================== */
+  // Room
+  const { data: roomTypes = [] } = useQuery({
     queryKey: ["roomTypes"],
     queryFn: async () => {
       const { data } = await getRoomTypes();
-      return data.map((x) => ({
-        label: x.type || x.name || "Unnamed",
-        value: x.id,
-      }));
+      return data.map((x) => ({ label: x.type, value: x.id }));
     },
     enabled: formData.category === "Room",
   });
 
-  const { data: availableRoomsRaw = [], isFetching: loadingRooms } = useQuery({
+  const {
+    data: availableRoomsRaw = [],
+    isFetching: loadingRooms,
+  } = useQuery({
     queryKey: ["availableRooms", formData.subCategoryId],
     queryFn: async () => {
       if (!formData.subCategoryId) return [];
-      const { data } = await getAvailRooms(formData.subCategoryId);
+      const { data } = await getAvailRooms(Number(formData.subCategoryId));
       return data;
     },
     enabled: formData.category === "Room" && !!formData.subCategoryId,
@@ -125,7 +168,7 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
 
   const availableRooms = useMemo(() => {
     return availableRoomsRaw.map((r) => ({
-      label: r.roomNumber || r.description || "Unnamed",
+      label: r.roomNumber || "Unnamed",
       value: r.id,
       priceMember: Number(r.roomType.priceMember),
       priceGuest: Number(r.roomType.priceGuest),
@@ -133,193 +176,134 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
     }));
   }, [availableRoomsRaw]);
 
-  /* ==================== HALL ==================== */
-  const { data: hallTypesRaw = [], isFetching: loadingHallTypes } = useQuery({
+  // Hall
+  // Hall
+  const { data: hallTypes = [] } = useQuery({
     queryKey: ["hallTypes"],
     queryFn: async () => {
-      const { data } = await getHallTypes();
-      return data;
+      const { data } = await getHallTypes();          // ← returns full Hall objects
+      // console.log("Raw halls:", data);               // ← keep this for debugging
+      return data.map((h) => ({
+        label: h.name,
+        value: h.id,
+        priceMember: Number(h.chargesMembers),       // ← ADD THIS
+        priceGuest: Number(h.chargesGuests),         // ← ADD THIS
+        isBooked: h.isBooked,
+      }));
     },
     enabled: formData.category === "Hall",
   });
+  // console.log(hallTypes)
 
-  const hallTypes = useMemo(() => {
-    return hallTypesRaw.map((h) => ({
-      label: h.name,
-      value: h.id,
-      priceMember: Number(h.chargesMembers),
-      priceGuest: Number(h.chargesGuests),
-      capacity: h.capacity,
-      isBooked: h.isBooked,
-      isConference: h.name.toLowerCase().includes("conference"),
-    }));
-  }, [hallTypesRaw]);
 
-  /* ==================== LAWN ==================== */
-  const { data: lawnTypes = [], isFetching: loadingLawnTypes } = useQuery({
-    queryKey: ["lawnTypes"],
+  // Lawn
+  const { data: lawnCategories = [] } = useQuery({
+    queryKey: ["lawnCategories"],
     queryFn: async () => {
       const { data } = await getLawnCategories();
-      return data.map((x) => ({
-        label: x.category || x.name || "Unnamed",
-        value: x.id,
-      }));
+      return data.map((c) => ({ label: c.category, value: c.id }));
     },
     enabled: formData.category === "Lawn",
   });
 
   const {
-    data: availableLawnsRaw = [],
+    data: availableLawns = [],
     isFetching: loadingLawns,
-    error: lawnError,
   } = useQuery({
     queryKey: ["availableLawns", formData.subCategoryId],
     queryFn: async () => {
       if (!formData.subCategoryId) return [];
-      const { data } = await getLawnCategoriesNames(formData.subCategoryId);
-      return data;
+      const { data } = await getAvailableLawns(formData.subCategoryId);
+      return data.map((l) => ({
+        label: `${l.description} (${l.minGuests}-${l.maxGuests} guests)`,
+        value: l.id,
+        memberCharges: Number(l.memberCharges),
+        guestCharges: Number(l.guestCharges),
+        isBooked: l.isBooked,
+      }));
+      // return data.filter((l) => l.lawnCategoryId === Number(formData.subCategoryId));
     },
     enabled: formData.category === "Lawn" && !!formData.subCategoryId,
-    onError: (e) => setError(e.message || "Failed to load lawns"),
   });
 
-  const availableLawns = useMemo(() => {
-    return availableLawnsRaw.map((l) => ({
-      label: l.description || `Lawn ${l.id}`,
-      value: l.id,
-      minGuests: l.minGuests,
-      maxGuests: l.maxGuests,
-      priceMember: Number(l.memberCharges),
-      priceGuest: Number(l.guestCharges),
-      isBooked: l.isBooked,
-    }));
-  }, [availableLawnsRaw]);
+  // Photoshoot
+  const {
+    data: photoshoots = [],
+    isFetching: loadingPhotoshoots,
+  } = useQuery({
+    queryKey: ["photoshoots"],
+    queryFn: async () => {
+      const { data } = await getPhotoshoots();
+      return data.map((p) => ({
+        label: p.description,
+        value: p.id,
+        priceMember: Number(p.memberCharges),
+        priceGuest: Number(p.guestCharges),
+        isBooked: p.isBooked,
+      }));
+    },
+    enabled: formData.category === "Photoshoot",
+  });
 
-  const formatLawnOption = (opt) => {
-    const { minGuests, maxGuests, priceMember, isBooked } = opt;
+  /* ==================== PRE-SELECTED OPTIONS ==================== */
+  const selectedMember = useMemo(() => {
+    if (!formData.membershipNo) return null;
     return (
-      <div className="flex items-center justify-between py-1">
-        <div>
-          <div className="font-medium">{opt.label}</div>
-          <div className="text-xs text-gray-400 flex items-center gap-2">
-            <Users size={12} /> {minGuests}–{maxGuests} guests
-            <DollarSign size={12} /> Rs-{priceMember.toLocaleString()}
-          </div>
-        </div>
-        {isBooked ? (
-          <XCircle size={16} className="text-red-500" title="Booked" />
-        ) : (
-          <CheckCircle size={16} className="text-green-500" title="Available" />
-        )}
-      </div>
+      members.find((m) => m.value === formData.membershipNo) || {
+        label: formData.membershipNo,
+        value: formData.membershipNo,
+      }
     );
-  };
+  }, [members, formData.membershipNo]);
 
-  /* ==================== SUB-CATEGORY ==================== */
-  const loadSubCategories = useCallback(() => {
-    switch (formData.category) {
-      case "Room": return roomTypes;
-      case "Hall": return hallTypes;
-      case "Lawn": return lawnTypes;
-      default: return [];
-    }
-  }, [formData.category, roomTypes, hallTypes, lawnTypes]);
-
-  const isLoadingSub = loadingRoomTypes || loadingHallTypes || loadingLawnTypes;
-
-  /* ==================== ENTITY ==================== */
-  const loadEntities = useCallback(() => {
-    if (formData.category === "Room" && formData.subCategoryId) return availableRooms;
-    if (formData.category === "Lawn" && formData.subCategoryId) return availableLawns;
+  const subCategoryOptions = useMemo(() => {
+    if (formData.category === "Room") return roomTypes;
+    if (formData.category === "Hall") return hallTypes;
+    if (formData.category === "Lawn") return lawnCategories;
     return [];
-  }, [formData.category, formData.subCategoryId, availableRooms, availableLawns]);
+  }, [formData.category, roomTypes, hallTypes, lawnCategories]);
 
-  const isLoadingEntity = loadingRooms || loadingLawns;
-
-  /* ==================== CONFERENCE HALL LOGIC ==================== */
-  const isConferenceHall = useMemo(() => {
-    if (formData.category !== "Hall" || !formData.subCategoryId) return false;
-    const hall = hallTypes.find((h) => h.value === formData.subCategoryId);
-    return hall?.isConference || false;
-  }, [formData.category, formData.subCategoryId, hallTypes]);
-
-  useEffect(() => {
-    if (isConferenceHall && formData.pricingType !== "member") {
-      setFormData((prev) => ({ ...prev, pricingType: "member", totalPrice: "" }));
-    }
-  }, [isConferenceHall]);
-
-  /* ==================== PRICE CALCULATION ==================== */
-  useEffect(() => {
-    if (!formData.category) {
-      setFormData((prev) => ({ ...prev, totalPrice: "" }));
-      return;
-    }
-    let price = 0;
-    const isMember = formData.pricingType === "member";
-    if (formData.category === "Photoshoot") {
-      if (formData.bookingDate && formData.photoshootTime) {
-        price = isMember ? 15000 : 20000;
-      }
-    } else if (formData.category === "Room") {
-      if (!formData.checkIn || !formData.checkOut) return;
-      const checkIn = new Date(formData.checkIn);
-      const checkOut = new Date(formData.checkOut);
-      if (checkOut <= checkIn) return;
-      const days = Math.ceil((checkOut - checkIn) / 86_400_000);
-      const room = availableRoomsRaw.find((r) => r.id === formData.entityId);
-      const pricePerDay = room ? Number(isMember ? room.roomType.priceMember : room.roomType.priceGuest) : 0;
-      price = pricePerDay * days;
-    } else if (["Lawn", "Hall"].includes(formData.category)) {
-      if (!formData.bookingDate || !formData.timeSlot) return;
-      let basePrice = 0;
-      if (formData.category === "Lawn" && formData.entityId) {
-        const lawn = availableLawnsRaw.find((l) => l.id === formData.entityId);
-        basePrice = lawn ? Number(isMember ? lawn.memberCharges : lawn.guestCharges) : 0;
-      } else if (formData.category === "Hall" && formData.subCategoryId) {
-        const hall = hallTypesRaw.find((h) => h.id === formData.subCategoryId);
-        basePrice = hall ? Number(isMember ? hall.chargesMembers : hall.chargesGuests) : 0;
-      }
-      const multiplier = formData.timeSlot === "morning" ? 0.5 : formData.timeSlot === "evening" ? 0.75 : 1;
-      price = basePrice * multiplier;
-    }
-    const total = price.toFixed(2);
-    setFormData((prev) => {
-      const newPaid = prev.paymentStatus === "HALF_PAID" && prev.paidAmount ? prev.paidAmount : "";
-      const pending = total && newPaid ? (total - newPaid).toFixed(2) : "";
-      return { ...prev, totalPrice: total, paidAmount: newPaid, pendingAmount: pending };
-    });
+  const entityOptions = useMemo(() => {
+    if (formData.category === "Room") return availableRooms;
+    if (formData.category === "Hall") return hallTypes;
+    if (formData.category === "Lawn") return availableLawns;
+    if (formData.category === "Photoshoot") return photoshoots;
+    console.log("entity:", availableLawns)
+    return [];
   }, [
     formData.category,
-    formData.checkIn,
-    formData.checkOut,
-    formData.bookingDate,
-    formData.timeSlot,
-    formData.photoshootTime,
-    formData.entityId,
-    formData.subCategoryId,
-    formData.pricingType,
-    availableRoomsRaw,
-    availableLawnsRaw,
-    hallTypesRaw,
+    availableRooms,
+    hallTypes,
+    availableLawns,
+    photoshoots,
   ]);
+
+  const selectedSubCategory = useMemo(() => {
+    if (!formData.subCategoryId) return null;
+    return subCategoryOptions.find((s) => s.value === Number(formData.subCategoryId)) || null;
+  }, [subCategoryOptions, formData.subCategoryId]);
+
+  const selectedEntity = useMemo(() => {
+    if (!formData.entityId) return null;
+    return entityOptions.find((e) => e.value === Number(formData.entityId)) || null;
+  }, [entityOptions, formData.entityId]);
 
   /* ==================== PAID AMOUNT LOGIC ==================== */
   const handlePaidAmountChange = (e) => {
-    const value = e.target.value.replace(/[^0-9.]/g, "");
+    const raw = e.target.value.replace(/[^0-9.]/g, "");
+    const paid = parseFloat(raw) || 0;
     const total = parseFloat(formData.totalPrice) || 0;
-    const paid = parseFloat(value) || 0;
     if (paid > total) {
       setError("Paid amount cannot exceed total price.");
       return;
-    } else {
-      setError("");
     }
+    setError("");
     const pending = (total - paid).toFixed(2);
     setFormData((prev) => ({
       ...prev,
-      paidAmount: value,
-      pendingAmount: paid === total ? "0.00" : pending,
+      paidAmount: raw,
+      pendingAmount: pending,
+      paymentStatus: paid === 0 ? "UNPAID" : paid === total ? "PAID" : "HALF_PAID",
     }));
   };
 
@@ -334,14 +318,15 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
     setFormData((prev) => ({
       ...prev,
       category: value,
-      subCategoryId: "",
+      subCategoryId: value === "Room" || value === "Lawn" ? "" : null,
       entityId: "",
       checkIn: "",
       checkOut: "",
       bookingDate: "",
       timeSlot: "",
       photoshootTime: "",
-      totalPrice: "",
+      guestsCount: "",
+      totalPrice: isEdit ? prev.totalPrice : "",
       pricingType: "member",
       paidAmount: "",
       pendingAmount: "",
@@ -353,11 +338,12 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
   };
 
   const handleSubCategoryChange = (opt) => {
+    if (!opt) return;
     setFormData((prev) => ({
       ...prev,
-      subCategoryId: opt ? opt.value : "",
+      subCategoryId: prev.category === "Room" || prev.category === "Lawn" ? opt.value : null,
       entityId: "",
-      totalPrice: "",
+      totalPrice: isEdit ? prev.totalPrice : "",
     }));
   };
 
@@ -366,21 +352,29 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
       setFormData((prev) => ({
         ...prev,
         entityId: opt.value,
-        totalPrice: "",
+        totalPrice: isEdit ? prev.totalPrice : "",
       }));
     }
   };
 
+  const handleEventTimeChange = (value) => {
+    setFormData((prev) => ({ ...prev, eventTime: value, totalPrice: isEdit ? prev.totalPrice : "" }));
+  };
+
+  const handleEventTypeChange = (value) => {
+    setFormData((prev) => ({ ...prev, eventType: value }));
+  };
+
   const handlePricingTypeChange = (type) => {
-    if (isConferenceHall && type === "guest") return;
-    setFormData((prev) => ({ ...prev, pricingType: type, totalPrice: "" }));
+    setFormData((prev) => ({ ...prev, pricingType: type, totalPrice: isEdit ? prev.totalPrice : "" }));
   };
 
   const handlePaymentStatusChange = (status) => {
+    const total = parseFloat(formData.totalPrice) || 0;
     setFormData((prev) => ({
       ...prev,
       paymentStatus: status,
-      paidAmount: status === "PAID" ? prev.totalPrice : "",
+      paidAmount: status === "PAID" ? total.toString() : "",
       pendingAmount: status === "PAID" ? "0.00" : "",
     }));
   };
@@ -391,81 +385,136 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
       ...prev,
       checkIn: value,
       checkOut: prev.checkOut && new Date(prev.checkOut) < new Date(value) ? "" : prev.checkOut,
-      totalPrice: "",
+      totalPrice: isEdit ? prev.totalPrice : "",
     }));
   };
 
   const handleCheckOutChange = (e) => {
-    setFormData((prev) => ({ ...prev, checkOut: e.target.value, totalPrice: "" }));
+    setFormData((prev) => ({ ...prev, checkOut: e.target.value, totalPrice: isEdit ? prev.totalPrice : "" }));
   };
 
   const handleBookingDateChange = (e) => {
-    setFormData((prev) => ({ ...prev, bookingDate: e.target.value, totalPrice: "" }));
+    setFormData((prev) => ({ ...prev, bookingDate: e.target.value, totalPrice: isEdit ? prev.totalPrice : "" }));
   };
 
-  const handleTimeSlotChange = (slot) => {
-    setFormData((prev) => ({ ...prev, timeSlot: slot, totalPrice: "" }));
+  const handleGuestsCountChange = (e) => {
+    const val = e.target.value.replace(/[^0-9]/g, "");
+    setFormData((prev) => ({ ...prev, guestsCount: val }));
   };
 
-  const handlePhotoshootTimeChange = (e) => {
-    setFormData((prev) => ({ ...prev, photoshootTime: e.target.value, totalPrice: "" }));
-  };
+  /* ==================== AUTO PRICE CALCULATION ==================== */
+  useEffect(() => {
+    // console.log(formData)
+    if (!formData.entityId) return;
+
+    const entity = entityOptions.find((e) => e.value === Number(formData.entityId));
+    if (!entity) return;
+
+    let total = 0;
+
+    if (formData.category === "Room") {
+      if (!formData.checkIn || !formData.checkOut) return;
+      const nights = Math.max(
+        1,
+        Math.ceil((new Date(formData.checkOut) - new Date(formData.checkIn)) / (1000 * 60 * 60 * 24))
+      );
+      const rate = formData.pricingType === "guest" ? entity.priceGuest : entity.priceMember;
+      total = rate * nights;
+    } else if (formData.category === "Hall") {
+      // console.log("asd")
+      if (!formData.bookingDate) return;
+      const rate = formData.pricingType === "guest" ? entity.priceGuest : entity.priceMember;
+      total = rate;
+      // console.log(total)
+    } else if (formData.category === "Lawn") {
+      if (!formData.bookingDate || !formData.guestsCount) return;
+      const guests = Number(formData.guestsCount);
+      const rate = formData.pricingType === "guest" ? entity.guestCharges : entity.memberCharges;
+      total = rate;
+    } else if (formData.category === "Photoshoot") {
+      if (!formData.photoshootTime) return;
+      const hours = parseFloat(formData.photoshootTime) || 0;
+      const rate = formData.pricingType === "guest" ? entity.priceGuest : entity.priceMember;
+      total = rate * hours;
+    }
+
+    const totalStr = total.toFixed(2);
+    setFormData((prev) => {
+      const prevPaid = parseFloat(prev.paidAmount) || 0;
+      let newPaid = prevPaid;
+      if (prev.paymentStatus === "PAID") newPaid = total;
+      const pending = (total - newPaid).toFixed(2);
+      return {
+        ...prev,
+        totalPrice: totalStr,
+        paidAmount: newPaid.toString(),
+        pendingAmount: pending,
+        paymentStatus:
+          newPaid === 0 ? "UNPAID" : newPaid === total ? "PAID" : "HALF_PAID",
+      };
+    });
+  }, [
+    formData.category,
+    formData.entityId,
+    formData.checkIn,
+    formData.checkOut,
+    formData.bookingDate,
+    formData.guestsCount,
+    formData.photoshootTime,
+    formData.pricingType,
+    entityOptions,
+  ]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     setError("");
-    const required = [formData.membershipNo, formData.category];
+
+    const required = [formData.membershipNo, formData.category, formData.entityId];
+
     if (formData.category === "Room") {
-      required.push(formData.subCategoryId, formData.entityId, formData.checkIn, formData.checkOut);
-    } else if (["Lawn", "Hall"].includes(formData.category)) {
-      required.push(formData.subCategoryId, formData.bookingDate, formData.timeSlot);
-      if (formData.category === "Lawn") required.push(formData.entityId);
+      required.push(formData.subCategoryId, formData.checkIn, formData.checkOut);
+    } else if (formData.category === "Lawn") {
+      required.push(formData.subCategoryId, formData.bookingDate, formData.guestsCount);
+    } else if (formData.category === "Hall") {
+      required.push(formData.bookingDate, formData.eventTime, formData.eventType);
     } else if (formData.category === "Photoshoot") {
       required.push(formData.bookingDate, formData.photoshootTime);
     }
+
     if (formData.paymentStatus === "HALF_PAID" && !formData.paidAmount) {
       setError("Please enter paid amount for half-paid booking.");
       return;
     }
+
     if (required.some((x) => !x)) {
       setError("Please fill all required fields.");
       return;
     }
+
     const payload = {
       id: isEdit ? booking.id : undefined,
       membershipNo: formData.membershipNo,
       category: formData.category,
-      subCategoryId: formData.subCategoryId || null,
-      entityId: formData.entityId || null,
+      subCategoryId: formData.subCategoryId ? Number(formData.subCategoryId) : null,
+      entityId: Number(formData.entityId),
       checkIn: formData.checkIn || null,
       checkOut: formData.checkOut || null,
       bookingDate: formData.bookingDate || null,
+      eventTime: formData.eventTime || null,
+      eventType: formData.eventType || null,
       timeSlot: formData.timeSlot || null,
       photoshootTime: formData.photoshootTime || null,
-      totalPrice: formData.totalPrice,
+      guestsCount: formData.guestsCount ? Number(formData.guestsCount) : null,
+      totalPrice: Number(formData.totalPrice),
       paymentStatus: formData.paymentStatus,
       pricingType: formData.pricingType,
-      paidAmount: formData.paidAmount || 0.00,
-      pendingAmount: formData.pendingAmount || 0.00,
+      paidAmount: Number(formData.paidAmount) || 0,
+      pendingAmount: Number(formData.pendingAmount) || 0,
+      paymentMode: "CASH",
     };
+
     onSubmit(payload, !isEdit);
   };
-
-  /* ==================== PRESELECT VALUES ==================== */
-  const selectedMember = useMemo(
-    () => members.find(m => m.value === formData.membershipNo) || null,
-    [members, formData.membershipNo]
-  );
-
-  const selectedSubCategory = useMemo(
-    () => loadSubCategories().find(s => s.value === formData.subCategoryId) || null,
-    [loadSubCategories, formData.subCategoryId]
-  );
-
-  const selectedEntity = useMemo(
-    () => loadEntities().find(e => e.value === formData.entityId) || null,
-    [loadEntities, formData.entityId]
-  );
 
   /* ==================== UI ==================== */
   return (
@@ -476,7 +525,6 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
       >
-        {/* Header */}
         <div className="p-4 flex justify-between items-center border-b border-amber-400/20 bg-gray-900">
           <h2 className="text-2xl text-amber-400 font-bold flex items-center gap-2">
             <CalendarPlus size={20} /> {isEdit ? "Edit" : "New"} Booking
@@ -486,7 +534,6 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
           </button>
         </div>
 
-        {/* Scrollable Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
           {/* ROW 1 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -508,6 +555,7 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
                 }
               />
             </div>
+
             <div>
               <label className="text-amber-400 text-sm font-medium mb-1 block">
                 Category <span className="text-red-500">*</span>
@@ -526,55 +574,73 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
             </div>
           </div>
 
-          {/* ROW 2: Subcategory + Entity */}
-          {["Room", "Hall", "Lawn"].includes(formData.category) && (
+          {/* ROW 2 - SUBCATEGORY & ENTITY */}
+          {formData.category && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Subcategory: Only for Room & Lawn */}
+              {(formData.category === "Room" || formData.category === "Lawn") && (
+                <div>
+                  <label className="text-amber-400 text-sm font-medium mb-1 block">
+                    {formData.category === "Room" ? "Room Type" : "Lawn Category"}{" "}
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <AsyncSelect
+                    key={`subcat-${formData.category}-${formData.subCategoryId}`}
+                    cacheOptions
+                    defaultOptions={subCategoryOptions}
+                    loadOptions={() => Promise.resolve(subCategoryOptions)}
+                    onChange={handleSubCategoryChange}
+                    placeholder="Select..."
+                    styles={selectStyles}
+                    isClearable
+                    value={selectedSubCategory}
+                    isLoading={
+                      formData.category === "Room"
+                        ? roomTypes.length === 0
+                        : lawnCategories.length === 0
+                    }
+                  />
+                </div>
+              )}
+
+              {/* Entity: Always show */}
+              {console.log(entityOptions)}
               <div>
                 <label className="text-amber-400 text-sm font-medium mb-1 block">
-                  {formData.category} Type <span className="text-red-500">*</span>
+                  {formData.category} <span className="text-red-500">*</span>
                 </label>
                 <AsyncSelect
+                  key={`entity-${formData.category}-${formData.entityId}`}
                   cacheOptions
-                  defaultOptions={loadSubCategories()}
-                  loadOptions={() => Promise.resolve(loadSubCategories())}
-                  onChange={handleSubCategoryChange}
-                  placeholder="Select type..."
+                  defaultOptions={entityOptions}
+                  loadOptions={() => Promise.resolve(entityOptions)}
+                  onChange={handleEntityChange}
+                  placeholder="Select..."
                   styles={selectStyles}
-                  isLoading={isLoadingSub}
-                  isDisabled={isLoadingSub}
                   isClearable
-                  value={selectedSubCategory}
+                  value={selectedEntity}
+                  isLoading={
+                    formData.category === "Room"
+                      ? loadingRooms
+                      : formData.category === "Lawn"
+                        ? loadingLawns
+                        : formData.category === "Hall"
+                          ? hallTypes.length === 0
+                          : loadingPhotoshoots
+                  }
+                  isOptionDisabled={(opt) => opt.isBooked}
                 />
               </div>
-              {["Room", "Lawn"].includes(formData.category) &&
-                formData.subCategoryId && (
-                  <div>
-                    <label className="text-amber-400 text-sm font-medium mb-1 block">
-                      Available {formData.category} <span className="text-red-500">*</span>
-                    </label>
-                    <AsyncSelect
-                      cacheOptions
-                      defaultOptions={loadEntities()}
-                      loadOptions={() => Promise.resolve(loadEntities())}
-                      onChange={handleEntityChange}
-                      placeholder="Select available..."
-                      styles={selectStyles}
-                      isLoading={isLoadingEntity}
-                      isDisabled={isLoadingEntity}
-                      isClearable
-                      formatOptionLabel={
-                        formData.category === "Lawn" ? formatLawnOption : undefined
-                      }
-                      isOptionDisabled={(opt) => opt.isBooked}
-                      value={selectedEntity}
-                    />
-                  </div>
-                )}
             </div>
           )}
+          {formData.category === "Hall" && <div>
 
-          {/* ROW 3: Date Logic */}
-          {formData.category === "Room" ? (
+
+
+          </div>}
+
+          {/* ROW 3 - DATES / TIME / GUESTS */}
+          {formData.category === "Room" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="text-amber-400 text-sm font-medium mb-1 block">
@@ -601,114 +667,140 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
                 />
               </div>
             </div>
-          ) : ["Lawn", "Hall", "Photoshoot"].includes(formData.category) ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="text-amber-400 text-sm font-medium mb-1 block">
-                  Booking Date <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="date"
-                  className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700 focus:border-amber-400 focus:outline-none"
-                  min={new Date().toISOString().split("T")[0]}
-                  value={formData.bookingDate}
-                  onChange={handleBookingDateChange}
-                />
-              </div>
-              {formData.category === "Photoshoot" ? (
-                <div>
-                  <label className="text-amber-400 text-sm font-medium mb-1 block">
-                    Time <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="time"
-                      className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700 focus:border-amber-400 focus:outline-none pr-10"
-                      value={formData.photoshootTime}
-                      onChange={handlePhotoshootTimeChange}
-                    />
-                    <Clock className="absolute right-3 top-3.5 text-gray-400" size={18} />
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  <label className="text-amber-400 text-sm font-medium mb-1 block">
-                    Time Slot <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex gap-2">
-                    {["morning", "evening", "night"].map((slot) => (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => handleTimeSlotChange(slot)}
-                        className={`flex-1 py-3 px-4 rounded-lg font-medium capitalize transition ${
-                          formData.timeSlot === slot
-                            ? "bg-amber-400 text-black"
-                            : "bg-gray-800 text-white hover:bg-gray-700"
-                        }`}
-                      >
-                        {slot}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : null}
+          )}
 
-          {/* ROW 4: Pricing Type */}
+          {formData.category !== "Room" && (
+            <div className="space-y-6">
+              {/* Booking Date */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="text-amber-400 text-sm font-medium mb-1 block">
+                    Booking Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700 focus:border-amber-400 focus:outline-none"
+                    min={new Date().toISOString().split("T")[0]}
+                    value={formData.bookingDate}
+                    onChange={handleBookingDateChange}
+                  />
+                </div>
+
+                {/* Event Time & Type - Only for Hall */}
+                {formData.category === "Hall" && (
+                  <>
+                    <div>
+                      <label className="text-amber-400 text-sm font-medium mb-1 block">
+                        Event Time <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700 focus:border-amber-400 focus:outline-none"
+                        value={formData.eventTime}
+                        onChange={(e) => handleEventTimeChange(e.target.value)}
+                      >
+                        <option value="">Select Time</option>
+                        <option value="morning-hitea">Morning - Hi-Tea</option>
+                        <option value="evening-lunch">Evening - Lunch</option>
+                        <option value="night-dinner">Night - Dinner</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-amber-400 text-sm font-medium mb-1 block">
+                        Event Type <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700 focus:border-amber-400 focus:outline-none"
+                        value={formData.eventType}
+                        onChange={(e) => handleEventTypeChange(e.target.value)}
+                      >
+                        <option value="">Select Type</option>
+                        <option value="mehandi">Mehandi</option>
+                        <option value="barat">Barat</option>
+                        <option value="walima">Walima</option>
+                        <option value="birthday">Birthday</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                  </>
+                )}
+
+                {/* Lawn & Photoshoot fields */}
+                {formData.category === "Lawn" && (
+                  <div>
+                    <label className="text-amber-400 text-sm font-medium mb-1 block">
+                      Guests Count <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700 focus:border-amber-400 focus:outline-none"
+                      placeholder="e.g. 150"
+                      value={formData.guestsCount}
+                      onChange={handleGuestsCountChange}
+                    />
+                  </div>
+                )}
+                {formData.category === "Photoshoot" && (
+                  <div>
+                    <label className="text-amber-400 text-sm font-medium mb-1 block">
+                      Hours <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700 focus:border-amber-400 focus:outline-none"
+                      placeholder="e.g. 2.5"
+                      value={formData.photoshootTime}
+                      onChange={(e) =>
+                        setFormData({ ...formData, photoshootTime: e.target.value })
+                      }
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* PRICING & PAYMENT */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="text-amber-400 text-sm font-medium mb-1 block">
-                Pricing Type
-              </label>
+              <label className="text-amber-400 text-sm font-medium mb-1 block">Pricing Type</label>
               <div className="flex gap-3">
                 <button
                   type="button"
                   onClick={() => handlePricingTypeChange("member")}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition ${
-                    formData.pricingType === "member"
-                      ? "bg-amber-400 text-black"
-                      : "bg-gray-800 text-white hover:bg-gray-700"
-                  }`}
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition ${formData.pricingType === "member"
+                    ? "bg-amber-400 text-black"
+                    : "bg-gray-800 text-white hover:bg-gray-700"
+                    }`}
                 >
-                  {formData.category === "Photoshoot" ? "Member (Rs-15,000)" : "Member"}
+                  Member
                 </button>
                 <button
                   type="button"
                   onClick={() => handlePricingTypeChange("guest")}
-                  disabled={isConferenceHall}
-                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition ${
-                    formData.pricingType === "guest"
-                      ? "bg-amber-400 text-black"
-                      : isConferenceHall
-                      ? "bg-gray-700 text-gray-500 cursor-not-allowed"
-                      : "bg-gray-800 text-white hover:bg-gray-700"
-                  }`}
+                  className={`flex-1 py-3 px-4 rounded-lg font-medium transition ${formData.pricingType === "guest"
+                    ? "bg-amber-400 text-black"
+                    : "bg-gray-800 text-white hover:bg-gray-700"
+                    }`}
                 >
-                  {formData.category === "Photoshoot"
-                    ? "Guest (Rs-20,000)"
-                    : isConferenceHall
-                    ? "Guest (Members Only)"
-                    : "Guest"}
+                  Guest
                 </button>
               </div>
             </div>
+
             <div>
-              <label className="text-amber-400 text-sm font-medium mb-1 block">
-                Payment Status
-              </label>
+              <label className="text-amber-400 text-sm font-medium mb-1 block">Payment Status</label>
               <div className="flex gap-2">
                 {["UNPAID", "HALF_PAID", "PAID"].map((status) => (
                   <button
                     key={status}
                     type="button"
                     onClick={() => handlePaymentStatusChange(status)}
-                    className={`flex-1 py-3 px-4 rounded-lg font-medium transition ${
-                      formData.paymentStatus === status
-                        ? "bg-amber-400 text-black"
-                        : "bg-gray-800 text-white hover:bg-gray-700"
-                    }`}
+                    className={`flex-1 py-3 px-4 rounded-lg font-medium transition ${formData.paymentStatus === status
+                      ? "bg-amber-400 text-black"
+                      : "bg-gray-800 text-white hover:bg-gray-700"
+                      }`}
                   >
                     {status.replace("_", " ")}
                   </button>
@@ -717,7 +809,7 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
             </div>
           </div>
 
-          {/* HALF PAID INPUT */}
+          {/* HALF-PAID */}
           {formData.paymentStatus === "HALF_PAID" && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
@@ -733,9 +825,7 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
                 />
               </div>
               <div>
-                <label className="text-amber-400 text-sm font-medium mb-1 block">
-                  Pending Amount
-                </label>
+                <label className="text-amber-400 text-sm font-medium mb-1 block">Pending Amount</label>
                 <input
                   type="text"
                   className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700"
@@ -744,9 +834,7 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
                 />
               </div>
               <div>
-                <label className="text-amber-400 text-sm font-medium mb-1 block">
-                  Total Amount
-                </label>
+                <label className="text-amber-400 text-sm font-medium mb-1 block">Total Amount</label>
                 <input
                   type="text"
                   className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700"
@@ -757,14 +845,12 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
             </div>
           )}
 
-          {/* NORMAL PRICE DISPLAY */}
+          {/* NORMAL TOTAL */}
           {formData.paymentStatus !== "HALF_PAID" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div />
               <div>
-                <label className="text-amber-400 text-sm font-medium mb-1 block">
-                  Total Price
-                </label>
+                <label className="text-amber-400 text-sm font-medium mb-1 block">Total Price</label>
                 <input
                   type="text"
                   className="bg-gray-800 text-white w-full p-3 rounded-md border border-gray-700"
@@ -776,19 +862,17 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
             </div>
           )}
 
-          {/* Error */}
-          {(error || lawnError) && (
+          {error && (
             <motion.p
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               className="text-red-400 text-sm col-span-2"
             >
-              {error || lawnError?.message}
+              {error}
             </motion.p>
           )}
         </form>
 
-        {/* Footer */}
         <div className="p-4 border-t border-amber-400/20 bg-gray-900 flex justify-end gap-3">
           <button
             type="button"
@@ -800,7 +884,10 @@ export default function BookingModal({ onClose, onSubmit, error, setError, booki
           <motion.button
             type="submit"
             onClick={handleSubmit}
-            disabled={!formData.totalPrice || (formData.paymentStatus === "HALF_PAID" && !formData.paidAmount)}
+            disabled={
+              !formData.totalPrice ||
+              (formData.paymentStatus === "HALF_PAID" && !formData.paidAmount)
+            }
             className="px-6 py-2.5 bg-amber-400 text-black rounded-full font-semibold hover:bg-amber-500 shadow-md disabled:opacity-50"
             whileTap={{ scale: 0.95 }}
           >

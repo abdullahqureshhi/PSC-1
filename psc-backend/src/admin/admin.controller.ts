@@ -73,8 +73,8 @@ export class AdminController {
   }
 
   @Get('search/members')
-  async searchMembers(@Query() searchFor: { searchFor: string }) {
-    return await this.adminService.searchMembers(searchFor.searchFor);
+  async searchMembers(@Query('searchFor') searchFor: string)  {
+    return await this.adminService.searchMembers(searchFor);
   }
 
   @Get('get/members')
@@ -84,7 +84,7 @@ export class AdminController {
     @Query('search') search?: string,
     @Query('status') status?: string,
   ) {
-    return this.adminService.getMembers({
+    return await this.adminService.getMembers({
       page,
       limit,
       search,
@@ -97,13 +97,13 @@ export class AdminController {
   @Roles(RolesEnum.SUPER_ADMIN)
   @Post('create/roomType')
   async createRoomType(@Body() payload: RoomTypeDto) {
-    return this.adminService.createRoomType(payload);
+    return await this.adminService.createRoomType(payload);
   }
   @UseGuards(JwtAccGuard, RolesGuard)
   @Roles(RolesEnum.SUPER_ADMIN)
   @Get('get/roomTypes')
   async getRoomTypes() {
-    return this.adminService.getRoomTypes();
+    return await this.adminService.getRoomTypes();
   }
 
   // rooms //
@@ -111,19 +111,19 @@ export class AdminController {
   @Roles(RolesEnum.SUPER_ADMIN)
   @Get('get/rooms')
   async getRooms() {
-    return this.adminService.getRooms();
+    return await this.adminService.getRooms();
   }
   @UseGuards(JwtAccGuard, RolesGuard)
   @Roles(RolesEnum.SUPER_ADMIN)
   @Get('get/rooms/categories')
   async getRoomCategories() {
-    return this.adminService.getRoomCategories();
+    return await this.adminService.getRoomCategories();
   }
   @UseGuards(JwtAccGuard, RolesGuard)
   @Roles(RolesEnum.SUPER_ADMIN)
   @Get('get/rooms/available')
   async getAvailRooms(@Query() roomTypeId: { roomTypeId: string }) {
-    return this.adminService.getAvailRooms(Number(roomTypeId.roomTypeId));
+    return await this.adminService.getAvailRooms(Number(roomTypeId.roomTypeId));
   }
 
   @UseGuards(JwtAccGuard, RolesGuard)
@@ -138,13 +138,13 @@ export class AdminController {
       return res.status(400).send({
         cause: 'room activity and out-of-order cannot be at the same time',
       });
-    return this.adminService.createRoom(payload);
+    return await this.adminService.createRoom(payload);
   }
   @UseGuards(JwtAccGuard, RolesGuard)
   @Roles(RolesEnum.SUPER_ADMIN)
   @Patch('update/room')
   async updateRoom(
-    @Body() payload: RoomDto,
+    @Body() payload: Partial<RoomDto>,
     @Res({ passthrough: true }) res: Response,
   ) {
     const { isActive, isOutOfOrder } = payload;
@@ -257,9 +257,8 @@ export class AdminController {
   @UseGuards(JwtAccGuard, RolesGuard)
   @Roles(RolesEnum.SUPER_ADMIN)
   @Get('get/lawns/available')
-  async getAvailLawns() {
-    console.log('avail lawns');
-    return this.adminService.getLawns();
+  async getAvailLawns(@Query("catId") catId: string) {
+    return this.adminService.getLawnNames(Number(catId));
   }
   @UseGuards(JwtAccGuard, RolesGuard)
   @Roles(RolesEnum.SUPER_ADMIN)
@@ -337,9 +336,10 @@ export class AdminController {
   // booking //
 
   @UseGuards(JwtAccGuard, RolesGuard)
-  @Roles(RolesEnum.SUPER_ADMIN)
+  @Roles(RolesEnum.SUPER_ADMIN, RolesEnum.ADMIN)
   @Post('create/booking')
   async createBooking(@Body() payload: BookingDto) {
+    // console.log(payload)
     if (payload.category === 'Room')
       return await this.bookingService.cBookingRoom({...payload, paymentMode: PaymentMode.CASH});
     else if (payload.category === 'Hall')
@@ -350,16 +350,19 @@ export class AdminController {
       return await this.bookingService.cBookingPhotoshoot({...payload, paymentMode: PaymentMode.CASH});
   }
   @UseGuards(JwtAccGuard, RolesGuard)
-  @Roles(RolesEnum.SUPER_ADMIN)
+  @Roles(RolesEnum.SUPER_ADMIN, RolesEnum.ADMIN)
   @Patch('update/booking')
   async updateBooking(@Body() payload: Partial<PhotoShootDto>) {
-    return this.adminService.updatePhotoshoot(payload);
+    return this.bookingService.uBookingRoom(payload);
   }
   @UseGuards(JwtAccGuard, RolesGuard)
-  @Roles(RolesEnum.SUPER_ADMIN)
+  @Roles(RolesEnum.SUPER_ADMIN, RolesEnum.ADMIN)
   @Get('get/bookings/all')
-  async getBookings() {
-    return this.bookingService.gBookingsRoom();
+  async getBookings(@Query("bookingsFor") bookingFor: string) {
+    if(bookingFor === "rooms") return this.bookingService.gBookingsRoom();
+    if(bookingFor === "halls") return this.bookingService.gBookingsHall();
+    if(bookingFor === "lawns") return this.bookingService.gBookingsLawn();
+    if(bookingFor === "photoshoots") return this.bookingService.gBookingPhotoshoot();
   }
 
   @UseGuards(JwtAccGuard, RolesGuard)

@@ -1,3 +1,4 @@
+import { PaymentMode } from "@prisma/client";
 import { IsEnum, IsNotEmpty, IsOptional } from "class-validator";
 
 enum PaymentStatus {
@@ -5,10 +6,10 @@ enum PaymentStatus {
     HALF_PAID,
     PAID
 }
-enum PaymentMode {
-    CASH,
-    ONLINE
-}
+// enum PaymentMode {
+//     CASH,
+//     ONLINE
+// }
 
 export class BookingDto{
     
@@ -32,16 +33,25 @@ export class BookingDto{
     timeSlot?: string | null
     @IsOptional()
     photoshootTime?: string | null
-    
+    @IsOptional()
+    eventTime?: string | null
+    @IsOptional()
+    eventType?: string | null
+    @IsOptional()
+    guestsCount?: string | null
     @IsNotEmpty({message: "Total Price must be specified"})
     totalPrice: string
     @IsEnum(PaymentStatus, { message: "Payment status must be UNPAID, HALF_PAID, or PAID" })
     paymentStatus: PaymentStatus
     @IsNotEmpty({message: "Pricing type either be Member or Guest"})
     pricingType: string
-    @IsOptional({message: "Paid amount must be specified"})
+    @IsOptional()
     paidAmount: string | number
     @IsNotEmpty({message: "Pending amount must be specified"})
     pendingAmount: string |number
+    @IsEnum(PaymentMode, {message: "payment mode must be provided"})
+    paymentMode: PaymentMode
+    @IsOptional()
+    prevRoomId?:string|null
 
 }
