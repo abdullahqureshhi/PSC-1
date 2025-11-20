@@ -3,12 +3,14 @@ import { Eye, EyeOff, Mail, Lock } from "lucide-react";
 import { authAdmin } from "../../config/apis";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 
 function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
   const queryClient = useQueryClient();
   const navigate = useNavigate()
+  const {toast} = useToast()
 
   const handleChange = (e) =>
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -17,10 +19,21 @@ function AuthPage() {
     e.preventDefault();
     const res = await authAdmin(form);
     if(res.status === 200){
+      toast({
+        title: "Success",
+        description: "Logged in successfully",
+        variant: "default",
+      });
       await queryClient.invalidateQueries({queryKey: ["currentUser"]});
       await queryClient.refetchQueries({queryKey: ["currentUser"]});
       navigate("/")
+      return;
     }
+    toast({
+      title: "Error",
+      description: "Failed to login",
+      variant: "destructive",
+    });
   };
 
   return (
