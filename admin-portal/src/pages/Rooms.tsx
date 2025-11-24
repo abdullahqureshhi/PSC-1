@@ -82,6 +82,18 @@ interface RoomReservation {
   createdAt: string;
   updatedAt: string;
 }
+interface RoomBooking {
+  id: string;
+  roomId: string;
+  checkIn: string;
+  checkOut: string;
+  memberName: string;
+  paymentStatus: string;
+  totalPrice: number;
+  Membership_No: string;
+  numberOfAdults: number;
+  numberOfChildren: number;
+}
 
 interface Room {
   id: string;
@@ -96,7 +108,9 @@ interface Room {
   outOfOrderTo?: string;
   outOfOrderFrom?: string;
   reservations: RoomReservation[];
+  bookings: RoomBooking[];
 }
+
 
 export default function Rooms() {
   const { toast } = useToast();
@@ -132,6 +146,7 @@ export default function Rooms() {
     queryKey: ["rooms"],
     queryFn: getRooms,
   });
+  // console.log(rooms)
 
   const { data: roomCategories = [] } = useQuery({
     queryKey: ["roomCategories"],
@@ -196,13 +211,13 @@ export default function Rooms() {
       reserveFrom?: string;
       reserveTo?: string;
     }) => reserveRoom(roomIds, reserve, reserveFrom, reserveTo),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
+      const action = variables.reserve ? "reserved" : "unreserved";
       toast({
-        title: "Reservations updated successfully",
-        description: data.message,
+        title: "Operation Successful",
+        description: `Successfully ${action} ${variables.roomIds.length} room(s)`,
       });
       queryClient.invalidateQueries({ queryKey: ["rooms"] });
-      // Don't close the dialog automatically - let admin continue making changes
     },
     onError: (err: any) => {
       const errorMessage = err.response?.data?.message || err.message || "Failed to update reservations";
@@ -280,15 +295,13 @@ export default function Rooms() {
   const isRoomReservedForDates = (room: Room) => {
     if (!reserveDates.from || !reserveDates.to) return false;
 
-    const selectedFrom = new Date(reserveDates.from).setHours(0, 0, 0, 0);
-    const selectedTo = new Date(reserveDates.to).setHours(0, 0, 0, 0);
+    // Convert selected dates to UTC strings for comparison
+    const selectedFromUTC = new Date(reserveDates.from + 'T00:00:00Z').toISOString();
+    const selectedToUTC = new Date(reserveDates.to + 'T00:00:00Z').toISOString();
 
     return room.reservations.some((reservation) => {
-      const reservationFrom = new Date(reservation.reservedFrom).setHours(0, 0, 0, 0);
-      const reservationTo = new Date(reservation.reservedTo).setHours(0, 0, 0, 0);
-      const reservedBy = reservation.admin.name;
-
-      return reservationFrom === selectedFrom && reservationTo === selectedTo;
+      return reservation.reservedFrom === selectedFromUTC &&
+        reservation.reservedTo === selectedToUTC;
     });
   };
 
@@ -296,16 +309,21 @@ export default function Rooms() {
   const hasOverlappingReservations = (room: Room) => {
     if (!reserveDates.from || !reserveDates.to) return false;
 
-    const selectedFrom = new Date(reserveDates.from).setHours(0, 0, 0, 0);
-    const selectedTo = new Date(reserveDates.to).setHours(0, 0, 0, 0);
+    // Convert selected dates to Date objects for comparison
+    const selectedFrom = new Date(reserveDates.from + 'T00:00:00Z');
+    const selectedTo = new Date(reserveDates.to + 'T00:00:00Z');
 
     return room.reservations.some((reservation) => {
-      const reservationFrom = new Date(reservation.reservedFrom).setHours(0, 0, 0, 0);
-      const reservationTo = new Date(reservation.reservedTo).setHours(0, 0, 0, 0);
+      const reservationFrom = new Date(reservation.reservedFrom);
+      const reservationTo = new Date(reservation.reservedTo);
 
-      // Check for overlap but EXCLUDE exact matches
-      const isExactMatch = reservationFrom === selectedFrom && reservationTo === selectedTo;
-      const hasOverlap = selectedFrom <= reservationTo && selectedTo >= reservationFrom;
+      // Check for exact match first
+      const isExactMatch =
+        reservation.reservedFrom === new Date(reserveDates.from + 'T00:00:00Z').toISOString() &&
+        reservation.reservedTo === new Date(reserveDates.to + 'T00:00:00Z').toISOString();
+
+      // Check for overlap (excluding exact matches)
+      const hasOverlap = selectedFrom < reservationTo && selectedTo > reservationFrom;
 
       return hasOverlap && !isExactMatch;
     });
@@ -320,39 +338,11 @@ export default function Rooms() {
       // Add to selected rooms
       setSelectedRooms((prev) => [...prev, roomId]);
     } else {
-      // Remove from selected rooms
+      // Remove from selected rooms - don't call API here, just update selection
       setSelectedRooms((prev) => prev.filter((id) => id !== roomId));
 
-      // If unchecking a room that was reserved for these dates, cancel the reservation immediately
-      if (isCurrentlyReserved && reserveDates.from && reserveDates.to) {
-        // Validate dates before making the API call
-        const fromDate = new Date(reserveDates.from);
-        fromDate.setHours(0, 0, 0, 0);
-
-        const toDate = new Date(reserveDates.to);
-        toDate.setHours(0, 0, 0, 0);
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        console.log(reserveDates)
-        // Only proceed if dates are valid
-        if (fromDate < toDate && fromDate >= today) {
-          reserveMutation.mutate({
-            roomIds: [roomId],
-            reserve: false,
-            reserveFrom: reserveDates.from,
-            reserveTo: reserveDates.to,
-          });
-        } else {
-          // If dates are invalid, show error and revert the selection
-          toast({
-            title: "Cannot remove reservation",
-            description: "Selected dates are invalid",
-            variant: "destructive",
-          });
-          setSelectedRooms((prev) => [...prev, roomId]); // Re-add the room
-        }
-      }
+      // We'll handle the actual reservation removal in handleBulkReserve
+      // This allows the admin to make multiple changes before saving
     }
   };
 
@@ -366,17 +356,11 @@ export default function Rooms() {
       return;
     }
 
-    // Parse dates as Pakistan Time
-    const fromDate = new Date(reserveDates.from + 'T00:00:00+05:00');
-    const toDate = new Date(reserveDates.to + 'T00:00:00+05:00');
-
+    // Simple date validation
+    const fromDate = new Date(reserveDates.from);
+    const toDate = new Date(reserveDates.to);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
-    // Apply Pakistan timezone offset for comparison
-    const pktOffset = 5 * 60 * 60 * 1000;
-    const todayPKT = new Date(today.getTime() + pktOffset);
-    todayPKT.setHours(0, 0, 0, 0);
 
     if (fromDate >= toDate) {
       toast({
@@ -387,7 +371,7 @@ export default function Rooms() {
       return;
     }
 
-    if (fromDate < todayPKT) {
+    if (fromDate < today) {
       toast({
         title: "Invalid start date",
         description: "Start date cannot be in the past",
@@ -436,19 +420,19 @@ export default function Rooms() {
     }
 
     // Process reservations and unreservations
-    if (roomsToReserve.length > 0) {
+    if (roomsToUnreserve.length > 0) {
       reserveMutation.mutate({
-        roomIds: roomsToReserve,
-        reserve: true,
+        roomIds: roomsToUnreserve,
+        reserve: false,
         reserveFrom: reserveDates.from,
         reserveTo: reserveDates.to,
       });
     }
 
-    if (roomsToUnreserve.length > 0) {
+    if (roomsToReserve.length > 0) {
       reserveMutation.mutate({
-        roomIds: roomsToUnreserve,
-        reserve: false,
+        roomIds: roomsToReserve,
+        reserve: true,
         reserveFrom: reserveDates.from,
         reserveTo: reserveDates.to,
       });
@@ -507,11 +491,21 @@ export default function Rooms() {
     const outOfOrderTo = room.outOfOrderTo ? new Date(room.outOfOrderTo) : null;
 
     // Check if room is currently out of order
-    if (room.isOutOfOrder) return "Out of Order";
+    if (room.isOutOfOrder) {
+      if (outOfOrderTo && outOfOrderTo < now) {
+        return "Maintenance Completed";
+      }
+      return "Out of Order";
+    }
 
     // Check if room is scheduled to be out of order in the future
     if (outOfOrderFrom && outOfOrderFrom > now) {
-      return "Scheduled for Maintenance"
+      return "Scheduled Maintenance";
+    }
+
+    // Check if room has current bookings
+    if (hasCurrentBooking(room)) {
+      return "Currently Booked";
     }
 
     if (room.isReserved) return "Currently Reserved";
@@ -531,11 +525,20 @@ export default function Rooms() {
   const getRoomStatusVariant = (room: Room) => {
     const now = new Date();
     const outOfOrderFrom = room.outOfOrderFrom ? new Date(room.outOfOrderFrom) : null;
+    const outOfOrderTo = room.outOfOrderTo ? new Date(room.outOfOrderTo) : null;
 
-    if (room.isOutOfOrder) return "destructive";
+    if (room.isOutOfOrder) {
+      if (outOfOrderTo && outOfOrderTo < now) {
+        return "outline";
+      }
+      return "destructive";
+    }
 
     // Check if scheduled for maintenance (future out-of-order)
     if (outOfOrderFrom && outOfOrderFrom > now) return "outline";
+
+    // Check for current bookings
+    if (hasCurrentBooking(room)) return "secondary";
 
     if (room.isReserved) return "secondary";
     if (!room.isActive) return "secondary";
@@ -559,6 +562,47 @@ export default function Rooms() {
           new Date(a.reservedFrom).getTime() -
           new Date(b.reservedFrom).getTime()
       );
+  };
+
+
+  // Get upcoming bookings for a room
+  const getUpcomingBookings = (room: Room) => {
+    const now = new Date();
+    return room.bookings
+      ?.filter((booking) => new Date(booking.checkOut) >= now)
+      .sort(
+        (a, b) =>
+          new Date(a.checkIn).getTime() - new Date(b.checkIn).getTime()
+      ) || [];
+  };
+
+  // Format date for display
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString();
+  };
+
+  // Get payment status badge
+  const getPaymentStatusBadge = (status: string) => {
+    switch (status) {
+      case "PAID":
+        return <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100 text-xs">Paid</Badge>;
+      case "UNPAID":
+        return <Badge variant="secondary" className="bg-red-100 text-red-800 hover:bg-red-100 text-xs">Unpaid</Badge>;
+      case "HALF_PAID":
+        return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100 text-xs">Half Paid</Badge>;
+      default:
+        return <Badge variant="outline" className="text-xs">{status}</Badge>;
+    }
+  };
+
+  // Check if room has current booking
+  const hasCurrentBooking = (room: Room) => {
+    const now = new Date();
+    return room.bookings?.some(booking => {
+      const checkIn = new Date(booking.checkIn);
+      const checkOut = new Date(booking.checkOut);
+      return now >= checkIn && now <= checkOut;
+    });
   };
 
   // Clear all filters
@@ -902,6 +946,7 @@ export default function Rooms() {
                   <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Reservations</TableHead>
+                  <TableHead>Bookings</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -909,11 +954,19 @@ export default function Rooms() {
               <TableBody>
                 {filteredRooms?.map((room: Room) => {
                   const upcomingReservations = getUpcomingReservations(room);
+                  const upcomingBookings = getUpcomingBookings(room);
+                  const hasCurrent = hasCurrentBooking(room);
+
                   return (
                     <TableRow key={room.id}>
                       <TableCell className="font-medium">
                         <div className="flex items-center gap-2">
                           {room.roomNumber}
+                          {hasCurrent && (
+                            <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">
+                              Occupied
+                            </Badge>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -922,51 +975,103 @@ export default function Rooms() {
                             {room.roomType?.type}
                           </div>
                           <div className="text-xs text-muted-foreground">
-                            Member: PKR {room.roomType?.priceMember} | Guest:
-                            PKR {room.roomType?.priceGuest}
+                            Member: PKR {room.roomType?.priceMember.toLocaleString()} | Guest:
+                            PKR {room.roomType?.priceGuest.toLocaleString()}
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getRoomStatusVariant(room)}>
-                          {getRoomStatus(room)}
-                        </Badge>
+                        <div className="space-y-1">
+                          <Badge variant={getRoomStatusVariant(room)}>
+                            {getRoomStatus(room)}
+                          </Badge>
 
-                        {/* Show maintenance dates for both current and scheduled out-of-order */}
-                        {(room.isOutOfOrder || (room.outOfOrderFrom && new Date(room.outOfOrderFrom) > new Date())) &&
-                          room.outOfOrderFrom && room.outOfOrderTo && (
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {new Date(room.outOfOrderFrom).toLocaleDateString()} - {new Date(room.outOfOrderTo).toLocaleDateString()}
+                          {/* Show out-of-order information */}
+                          {(room.isOutOfOrder || (room.outOfOrderFrom && new Date(room.outOfOrderFrom) > new Date())) && (
+                            <div className="space-y-1">
+                              {/* Show maintenance dates */}
+                              {room.outOfOrderFrom && room.outOfOrderTo && (
+                                <div className="text-xs text-muted-foreground">
+                                  {formatDate(room.outOfOrderFrom)} - {formatDate(room.outOfOrderTo)}
+                                </div>
+                              )}
+
+                              {/* Show out-of-order reason */}
+                              {room.outOfOrderReason && (
+                                <div className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200">
+                                  <div className="font-medium">Maintenance:</div>
+                                  {room.outOfOrderReason.substring(0, 11).length > 11 ? `${room.outOfOrderReason.substring(0, 11)}...` : room.outOfOrderReason.substring(0, 11)}
+                                </div>
+                              )}
                             </div>
                           )}
 
-                        {/* Show current out-of-order reason if available */}
-                        {room.isOutOfOrder && room.outOfOrderReason && (
-                          <div className="text-xs text-red-600 mt-1">
-                            {room.outOfOrderReason}
-                          </div>
-                        )}
+                          {/* Show current booking status */}
+                          {hasCurrent && (
+                            <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded border border-blue-200">
+                              Currently occupied by guest
+                            </div>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         {upcomingReservations.length > 0 ? (
-                          <div className="space-y-1">
+                          <div className="space-y-2">
                             {upcomingReservations
                               .slice(0, 2)
                               .map((reservation) => (
-                                <div key={reservation.id} className="text-xs flex flex-col">
-                                  <strong>{reservation.admin.name}</strong>
-                                  {new Date(
-                                    reservation.reservedFrom
-                                  ).toLocaleDateString()}{" "}
-                                  -{" "}
-                                  {new Date(
-                                    reservation.reservedTo
-                                  ).toLocaleDateString()}
+                                <div key={reservation.id} className="text-xs border-l-2 border-orange-400 pl-2">
+                                  <div className="font-medium text-orange-700">
+                                    {reservation.admin.name}
+                                  </div>
+                                  <div className="text-muted-foreground">
+                                    {formatDate(reservation.reservedFrom)} - {formatDate(reservation.reservedTo)}
+                                  </div>
                                 </div>
                               ))}
                             {upcomingReservations.length > 2 && (
                               <div className="text-xs text-muted-foreground">
                                 +{upcomingReservations.length - 2} more
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            No upcoming
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {upcomingBookings.length > 0 ? (
+                          <div className="space-y-2">
+                            {upcomingBookings
+                              .slice(0, 2)
+                              .map((booking) => (
+                                <div key={booking.id} className="text-xs border-l-2 border-blue-400 pl-2">
+                                  <div className="font-medium">
+                                    Member {booking.Membership_No}
+                                  </div>
+                                  <div className="text-muted-foreground">
+                                    {formatDate(booking.checkIn)} - {formatDate(booking.checkOut)}
+                                  </div>
+                                  <div className="mt-1">
+                                    {getPaymentStatusBadge(booking.paymentStatus)}
+                                  </div>
+                                  {booking.totalPrice && (
+                                    <div className="text-xs text-muted-foreground">
+                                      PKR {booking.totalPrice.toLocaleString()}
+                                    </div>
+                                  )}
+                                  {(booking.numberOfAdults > 0 || booking.numberOfChildren > 0) && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {booking.numberOfAdults} adult(s){booking.numberOfChildren > 0 ? `, ${booking.numberOfChildren} child(ren)` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            {upcomingBookings.length > 2 && (
+                              <div className="text-xs text-muted-foreground">
+                                +{upcomingBookings.length - 2} more
                               </div>
                             )}
                           </div>
@@ -1239,7 +1344,11 @@ export default function Rooms() {
                           if (room.outOfOrderFrom && room.outOfOrderTo) {
                             const outOfOrderFrom = new Date(room.outOfOrderFrom);
                             const outOfOrderTo = new Date(room.outOfOrderTo);
-                            return (selectedFrom <= outOfOrderTo && selectedTo >= outOfOrderFrom);
+
+                            // Check for overlap: selected dates should not overlap with out-of-order period
+                            const hasOverlap = selectedFrom < outOfOrderTo && selectedTo > outOfOrderFrom;
+
+                            return hasOverlap;
                           }
 
                           return false;
@@ -1247,18 +1356,18 @@ export default function Rooms() {
 
                         const upcomingReservations = getUpcomingReservations(room);
 
-                        // Determine if checkbox should be disabled
-                        // Room is disabled ONLY if:
+                        // FIX: Only disable checkbox if:
                         // 1. It has overlapping reservations (and not already reserved for these exact dates), OR
                         // 2. Selected dates conflict with out-of-order period
+                        // BUT: Allow unchecking even if room is reserved for these exact dates (to remove reservation)
                         const isCheckboxDisabled =
-                          (hasOverlap && !isReservedForDates) ||
-                          isOutOfOrderForSelectedDates;
+                          (hasOverlap && !isReservedForDates) || // Disable if overlapping but not exact match
+                          isOutOfOrderForSelectedDates; // Disable if out of order during selected dates
 
                         return (
                           <div
                             key={room.id}
-                            className={`flex items-center space-x-3 p-3 border rounded-lg ${hasOverlap
+                            className={`flex items-center space-x-3 p-3 border rounded-lg ${hasOverlap && !isReservedForDates
                               ? "bg-orange-50 border-orange-200"
                               : isReservedForDates
                                 ? "bg-blue-50 border-blue-200"
@@ -1279,7 +1388,7 @@ export default function Rooms() {
                             <div className="flex-1 min-w-0">
                               <div className="font-medium flex items-center gap-2">
                                 Room {room.roomNumber}
-                                {hasOverlap && (
+                                {hasOverlap && !isReservedForDates && (
                                   <AlertCircle className="h-4 w-4 text-orange-500" />
                                 )}
                                 {isOutOfOrderForSelectedDates && (
@@ -1382,16 +1491,26 @@ export default function Rooms() {
           </div>
           <DialogFooter className="shrink-0 pt-4 border-t">
             <div className="flex justify-between items-center w-full">
-              <div className="text-sm text-muted-foreground">
+              <div className="text-sm text-muted-foreground space-y-1">
                 <div>{selectedRooms.length} room(s) selected</div>
-                <div>
-                  {
-                    selectedRooms.filter((roomId) => {
+                <div className="flex gap-4">
+                  <span className="text-blue-600">
+                    {selectedRooms.filter((roomId) => {
                       const room = rooms.find((r: Room) => r.id === roomId);
                       return room && isRoomReservedForDates(room);
-                    }).length
-                  }{" "}
-                  already reserved for these dates
+                    }).length} already reserved (will keep)
+                  </span>
+                  <span className="text-green-600">
+                    {selectedRooms.filter((roomId) => {
+                      const room = rooms.find((r: Room) => r.id === roomId);
+                      return room && !isRoomReservedForDates(room);
+                    }).length} to be reserved
+                  </span>
+                  <span className="text-orange-600">
+                    {rooms.filter((room: Room) =>
+                      isRoomReservedForDates(room) && !selectedRooms.includes(room.id)
+                    ).length} to be unreserved
+                  </span>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -1399,8 +1518,7 @@ export default function Rooms() {
                   variant="outline"
                   onClick={() => {
                     setReserveDialog(false);
-                    setSelectedRooms([]);
-                    setReserveDates({ from: "", to: "" });
+                    // Don't reset selectedRooms here to maintain state if dialog is reopened
                   }}
                 >
                   Cancel
@@ -1419,7 +1537,7 @@ export default function Rooms() {
                       Updating...
                     </div>
                   ) : (
-                    `Save Changes (${selectedRooms.length})`
+                    `Save Changes`
                   )}
                 </Button>
               </div>

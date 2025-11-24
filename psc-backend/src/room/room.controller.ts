@@ -200,5 +200,11 @@ export class RoomController {
   }
   
 
+  // calendar
+  @UseGuards(JwtAccGuard)
+  @Get('calendar')
+  async roomCalendar(){
+    return await this.room.roomCalendar();
+  }
 
 }

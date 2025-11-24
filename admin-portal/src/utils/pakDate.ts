@@ -24,3 +24,16 @@ export const getPakistanDateString = (date: Date): string => {
   const pktDate = new Date(date.getTime() + (5 * 60 * 60 * 1000));
   return pktDate.toISOString().split('T')[0];
 };
+
+
+
+// Helper function to format dates for display in Pakistan time
+export const formatDateForDisplay = (dateString: string) => {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-PK', {
+    timeZone: 'Asia/Karachi',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+};

@@ -642,7 +642,47 @@ export const generateVoucher = async (
   }
 };
 
+//////////////////////////////////////////////////////////////////////////////
 
+// reserve hall
+export const reserveHall = async (
+  hallIds: string[],
+  reserve: boolean,
+  reserveFrom?: string,
+  reserveTo?: string
+): Promise<any> => {
+  try {
+    const payload: any = { hallIds, reserve };
+
+    // Always include reserveFrom and reserveTo if they are provided
+    // The backend needs them to identify which specific reservation to remove
+    if (reserveFrom && reserveTo) {
+      payload.reserveFrom = reserveFrom;
+      payload.reserveTo = reserveTo;
+    } else if (reserve) {
+      // If reserving and dates are missing, throw error
+      throw new Error("Reservation dates are required when reserving rooms");
+    }
+    // If unreserving and dates are missing, still proceed - backend will handle it
+
+    // console.log("Sending payload:", payload); // Debug log
+
+    const response = await axios.patch(
+      `${base_url}/hall/reserve/halls`,
+      payload,
+      { withCredentials: true }
+    );
+    return response.data;
+  } catch (error: any) {
+    const message =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      "Something went wrong";
+
+    throw { message, status: error.response?.status || 500 };
+  }
+};
 // halls
 
 export const createHall = async (data: any): Promise<any> => {
@@ -1097,6 +1137,30 @@ export const deleteSport = async (id: string): Promise<any> => {
       }
     );
     return response;
+  } catch (error: any) {
+    const message =
+      error.response?.data?.message ||
+      error.response?.data?.error ||
+      error.message ||
+      "Something went wrong";
+
+    throw { message, status: error.response?.status || 500 };
+  }
+};
+
+
+//////////////////////////////////////////////////////
+
+// calendar
+export const getCalendarRooms = async (): Promise<any> => {
+  try {
+    const response = await axios.get(
+      `${base_url}/room/calendar`,
+      {
+        withCredentials: true,
+      }
+    );
+    return response.data;
   } catch (error: any) {
     const message =
       error.response?.data?.message ||

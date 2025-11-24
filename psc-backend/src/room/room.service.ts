@@ -277,6 +277,7 @@ export class RoomService {
             },
           },
         },
+        bookings: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -501,7 +502,56 @@ export class RoomService {
           },
         });
 
-        // Now check for conflicts (excluding the ones we just deleted)
+        // Check for out-of-order conflicts
+        const outOfOrderRooms = await prisma.room.findMany({
+          where: {
+            id: { in: roomIds },
+            OR: [
+              {
+                // Currently out of order
+                isOutOfOrder: true,
+              },
+              {
+                // Scheduled out of order during reservation period
+                AND: [
+                  { outOfOrderFrom: { not: null } },
+                  { outOfOrderTo: { not: null } },
+                  {
+                    OR: [
+                      {
+                        // Out of order period overlaps with reservation
+                        outOfOrderFrom: { lte: toDate },
+                        outOfOrderTo: { gte: fromDate },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          select: {
+            roomNumber: true,
+            outOfOrderFrom: true,
+            outOfOrderTo: true,
+            isOutOfOrder: true,
+          },
+        });
+
+        if (outOfOrderRooms.length > 0) {
+          const conflicts = outOfOrderRooms.map((room) => {
+            if (room.isOutOfOrder) {
+              return `Room ${room.roomNumber} is currently out of order`;
+            } else {
+              return `Room ${room.roomNumber} is out of order from ${formatPakistanDate(room.outOfOrderFrom!)} to ${formatPakistanDate(room.outOfOrderTo!)}`;
+            }
+          });
+          throw new HttpException(
+            `Out of order conflicts: ${conflicts.join(', ')}`,
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        // Now check for booking conflicts (excluding the ones we just deleted)
         const conflictingBookings = await prisma.roomBooking.findMany({
           where: {
             roomId: { in: roomIds },
@@ -656,6 +706,13 @@ export class RoomService {
           },
         },
       },
+    });
+  }
+
+  // calendar
+  async roomCalendar() {
+    return await this.prismaService.room.findMany({
+      include: { reservations: true, bookings: true, roomType: true },
     });
   }
 }
