@@ -276,7 +276,7 @@ model Room {
   id         Int      @id @unique @default(autoincrement())
   roomNumber String   @unique() @db.VarChar(50)
   roomTypeId Int
-  roomType   RoomType @relation(fields: [roomTypeId], references: [id])
+  roomType   RoomType @relation(fields: [roomTypeId], references: [id], onDelete: Cascade)
 
   description String? @db.VarChar(300)
 
