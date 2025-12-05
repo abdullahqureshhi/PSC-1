@@ -28,6 +28,11 @@ export class AffiliationController {
         return await this.affiliationService.getAffiliatedClubs();
     }
 
+    @Get('clubs/active')
+    async getAffiliatedClubsActive() {
+        return await this.affiliationService.getAffiliatedClubsActive();
+    }
+
     @Get('clubs/:id')
     async getAffiliatedClubById(@Param('id') id: string) {
         return await this.affiliationService.getAffiliatedClubById(Number(id));

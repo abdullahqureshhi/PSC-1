@@ -831,7 +831,7 @@ export class RoomService {
   // calendar
   async roomCalendar() {
     return await this.prismaService.room.findMany({
-      include: { reservations: true, bookings: true, roomType: true },
+      include: { reservations: true, bookings: true, roomType: true, outOfOrders: true },
     });
   }
 }

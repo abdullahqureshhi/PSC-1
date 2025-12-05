@@ -1,15 +1,12 @@
 import { useState, useEffect } from "react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, differenceInDays, addDays, isWithinInterval } from "date-fns";
 import { CalendarIcon, ChevronLeft, ChevronRight, Bed, Users, AlertTriangle, Clock, CheckCircle, XCircle, Building, TreePalm, Camera, Menu, X } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { getCalendarRooms, getHalls, getLawns, getPhotoshoots } from "../../config/apis";
@@ -35,6 +32,19 @@ interface RoomReservation {
   };
 }
 
+interface OutOfOrder {
+  id: number;
+  roomId?: number;
+  hallId?: number;
+  lawnId?: number;
+  photoshootId?: number;
+  reason: string;
+  startDate: string;
+  endDate: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface Room {
   id: string;
   roomNumber: string;
@@ -47,11 +57,9 @@ interface Room {
   isOutOfOrder: boolean;
   isReserved: boolean;
   isBooked: boolean;
-  outOfOrderFrom?: string;
-  outOfOrderTo?: string;
-  outOfOrderReason?: string;
   bookings: RoomBooking[];
   reservations: RoomReservation[];
+  outOfOrders: OutOfOrder[];
 }
 
 interface Hall {
@@ -62,11 +70,9 @@ interface Hall {
   isOutOfOrder: boolean;
   isBooked: boolean;
   isReserved: boolean;
-  outOfOrderFrom?: string;
-  outOfOrderTo?: string;
-  outOfOrderReason?: string;
   bookings: any[];
   reservations: any[];
+  outOfOrders: OutOfOrder[];
 }
 
 interface Lawn {
@@ -77,11 +83,9 @@ interface Lawn {
   isOutOfOrder: boolean;
   isBooked: boolean;
   isReserved: boolean;
-  outOfOrderFrom?: string;
-  outOfOrderTo?: string;
-  outOfOrderReason?: string;
   bookings: any[];
   reservations: any[];
+  outOfOrders: OutOfOrder[];
 }
 
 interface Photoshoot {
@@ -91,39 +95,28 @@ interface Photoshoot {
   isOutOfOrder: boolean;
   isBooked: boolean;
   isReserved: boolean;
-  outOfOrderFrom?: string;
-  outOfOrderTo?: string;
-  outOfOrderReason?: string;
   bookings: any[];
   reservations: any[];
-}
-
-interface CalendarDay {
-  date: Date;
-  isCurrentMonth: boolean;
-  isToday: boolean;
-  bookings: any[];
-  reservations: any[];
-  isOutOfOrder: boolean;
-  outOfOrderInfo: Array<{
-    facilityName: string;
-    reason: string;
-    from: string;
-    to: string;
-  }>;
-  isPast: boolean;
-  facilityType: string;
+  outOfOrders: OutOfOrder[];
 }
 
 type FacilityType = "ROOMS" | "HALLS" | "LAWNS" | "PHOTOSHOOTS";
+
+interface TimelinePeriod {
+  id: string;
+  type: 'booking' | 'reservation' | 'outOfOrder';
+  startDate: Date;
+  endDate: Date;
+  data: any;
+}
 
 export default function FacilityCalendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedFacilityType, setSelectedFacilityType] = useState<FacilityType>("ROOMS");
   const [selectedRoomType, setSelectedRoomType] = useState("ALL");
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
-  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
-  const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState<any>(null);
+  const [daysToShow, setDaysToShow] = useState(30); // Default to 30 days view
 
   // Fetch data based on selected facility type
   const { data: rooms = [], isLoading: roomsLoading } = useQuery<Room[]>({
@@ -131,6 +124,7 @@ export default function FacilityCalendar() {
     queryFn: getCalendarRooms,
     enabled: selectedFacilityType === "ROOMS",
   });
+  console.log(rooms)
 
   const { data: halls = [], isLoading: hallsLoading } = useQuery<Hall[]>({
     queryKey: ["halls"],
@@ -151,20 +145,6 @@ export default function FacilityCalendar() {
   });
 
   const isLoading = roomsLoading || hallsLoading || lawnsLoading || photoshootsLoading;
-
-  // Helper function to get payment status badge
-  const getPaymentStatusBadge = (status: string) => {
-    switch (status) {
-      case "PAID":
-        return <Badge variant="default" className="bg-green-100 text-green-800">Paid</Badge>;
-      case "UNPAID":
-        return <Badge variant="destructive" className="bg-red-100 text-red-800">Unpaid</Badge>;
-      case "HALF_PAID":
-        return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">Half Paid</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
 
   // Get current facility data based on selection
   const getCurrentFacilities = () => {
@@ -189,155 +169,158 @@ export default function FacilityCalendar() {
     return typeMatch && roomMatch;
   });
 
-  // Get facilities to display in calendar
-  const getFacilitiesForCalendar = () => {
+  // Get facilities to display in timeline
+  const getFacilitiesForTimeline = () => {
     if (selectedFacilityType === "ROOMS") {
       return filteredRooms;
     }
     return getCurrentFacilities();
   };
 
-  const generateCalendarDays = (): CalendarDay[] => {
-    const monthStart = startOfMonth(currentDate);
-    const monthEnd = endOfMonth(currentDate);
-    const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
-    const facilities = getFacilitiesForCalendar();
+  // Generate date range for the timeline
+  const generateDateRange = () => {
+    const startDate = new Date(currentDate);
+    const dates = [];
+    for (let i = 0; i < daysToShow; i++) {
+      dates.push(addDays(startDate, i));
+    }
+    return dates;
+  };
 
-    return days.map(date => {
-      const dayBookings: any[] = [];
-      const dayReservations: any[] = [];
-      const dayOutOfOrderInfo: Array<{
-        facilityName: string;
-        reason: string;
-        from: string;
-        to: string;
-      }> = [];
+  const dateRange = generateDateRange();
 
-      facilities.forEach(facility => {
-        // Check bookings for this day
-        const facilityBookings = facility.bookings?.filter((booking: any) => {
-          if (selectedFacilityType === "ROOMS") {
-            const checkIn = new Date(booking.checkIn);
-            const checkOut = new Date(booking.checkOut);
-            return date >= checkIn && date <= checkOut;
-          } else {
-            // For other facilities, use bookingDate or similar field
-            const bookingDate = new Date(booking.bookingDate || booking.createdAt);
-            return isSameDay(bookingDate, date);
-          }
-        }) || [];
-        dayBookings.push(...facilityBookings);
+  // Get periods for a facility
+  const getPeriodsForFacility = (facility: any): TimelinePeriod[] => {
+    const periods: TimelinePeriod[] = [];
+    const timelineStart = dateRange[0];
+    const timelineEnd = dateRange[dateRange.length - 1];
 
-        // Check reservations for this day
-        const facilityReservations = facility.reservations?.filter((reservation: any) => {
-          const reservedFrom = new Date(reservation.reservedFrom);
-          return isSameDay(reservedFrom, date);
-        }) || [];
-        dayReservations.push(...facilityReservations);
-
-        // Check if facility is out of order on this day (current OR scheduled)
-        let outOfOrderFrom, outOfOrderTo, outOfOrderReason;
-
+    // Add bookings
+    if (facility.bookings && facility.bookings.length > 0) {
+      facility.bookings.forEach((booking: any) => {
         if (selectedFacilityType === "ROOMS") {
-          outOfOrderFrom = facility.outOfOrderFrom;
-          outOfOrderTo = facility.outOfOrderTo;
-          outOfOrderReason = facility.outOfOrderReason;
+          const startDate = new Date(booking.checkIn);
+          const endDate = new Date(booking.checkOut);
+
+          // Only include if period overlaps with visible range
+          if (endDate >= timelineStart && startDate <= timelineEnd) {
+            periods.push({
+              id: `booking-${booking.id}`,
+              type: 'booking',
+              startDate,
+              endDate,
+              data: booking
+            });
+          }
         } else {
-          outOfOrderFrom = facility.outOfOrderFrom;
-          outOfOrderTo = facility.outOfOrderTo;
-          outOfOrderReason = facility.outOfOrderReason;
-        }
+          // For other facilities, bookingDate represents the booking date
+          const bookingDate = new Date(booking.bookingDate || booking.createdAt);
 
-        // Check if facility has out-of-order dates that include this day
-        // This includes both current out-of-order AND scheduled future maintenance
-        if (outOfOrderFrom && outOfOrderTo) {
-          const serviceFrom = new Date(outOfOrderFrom);
-          const serviceTo = new Date(outOfOrderTo);
-
-          // Check if the current date falls within the out-of-order period
-          if (date >= serviceFrom && date <= serviceTo) {
-            // Get facility name based on type
-            let facilityName = '';
-            if (selectedFacilityType === "ROOMS") {
-              facilityName = `Room ${facility.roomNumber}`;
-            } else if (selectedFacilityType === "HALLS") {
-              facilityName = facility.name;
-            } else if (selectedFacilityType === "LAWNS") {
-              facilityName = facility.name;
-            } else if (selectedFacilityType === "PHOTOSHOOTS") {
-              facilityName = facility.name;
-            }
-
-            dayOutOfOrderInfo.push({
-              facilityName,
-              reason: outOfOrderReason || 'Maintenance',
-              from: outOfOrderFrom,
-              to: outOfOrderTo
+          // Only include if date is within visible range
+          if (bookingDate >= timelineStart && bookingDate <= timelineEnd) {
+            periods.push({
+              id: `booking-${booking.id}`,
+              type: 'booking',
+              startDate: bookingDate,
+              endDate: bookingDate,
+              data: booking
             });
           }
         }
       });
+    }
 
-      return {
-        date,
-        isCurrentMonth: isSameMonth(date, currentDate),
-        isToday: isSameDay(date, new Date()),
-        bookings: dayBookings,
-        reservations: dayReservations,
-        isOutOfOrder: dayOutOfOrderInfo.length > 0,
-        outOfOrderInfo: dayOutOfOrderInfo,
-        isPast: date < new Date(new Date().setHours(0, 0, 0, 0)),
-        facilityType: selectedFacilityType,
-      };
-    });
+    // Add reservations
+    if (facility.reservations && facility.reservations.length > 0) {
+      facility.reservations.forEach((reservation: any) => {
+        const startDate = new Date(reservation.reservedFrom);
+        const endDate = new Date(reservation.reservedTo);
+
+        // Only include if period overlaps with visible range
+        if (endDate >= timelineStart && startDate <= timelineEnd) {
+          periods.push({
+            id: `reservation-${reservation.id}`,
+            type: 'reservation',
+            startDate,
+            endDate,
+            data: reservation
+          });
+        }
+      });
+    }
+
+    // Add out of order periods from outOfOrders array
+    if (facility.outOfOrders && facility.outOfOrders.length > 0) {
+      facility.outOfOrders.forEach((outOfOrder: OutOfOrder) => {
+        const startDate = new Date(outOfOrder.startDate);
+        const endDate = new Date(outOfOrder.endDate);
+
+        // Only include if period overlaps with visible range
+        if (endDate >= timelineStart && startDate <= timelineEnd) {
+          periods.push({
+            id: `outoforder-${outOfOrder.id}`,
+            type: 'outOfOrder',
+            startDate,
+            endDate,
+            data: {
+              reason: outOfOrder.reason || 'Maintenance',
+              from: outOfOrder.startDate,
+              to: outOfOrder.endDate
+            }
+          });
+        }
+      });
+    }
+
+    return periods;
   };
 
-  const calendarDays = generateCalendarDays();
+  // Calculate period bar position and width with clipping
+  const calculatePeriodStyle = (period: TimelinePeriod, timelineStart: Date, timelineEnd: Date, dayWidth: number) => {
+    // Clip period to visible date range
+    const clippedStart = period.startDate < timelineStart ? timelineStart : period.startDate;
+    const clippedEnd = period.endDate > timelineEnd ? timelineEnd : period.endDate;
 
-  // Calculate statistics
-  const stats = {
-    available: calendarDays.filter(day =>
-      !day.isPast &&
-      day.bookings.length === 0 &&
-      day.reservations.length === 0 &&
-      !day.isOutOfOrder
-    ).length,
-    booked: calendarDays.filter(day => day.bookings.length > 0).length,
-    reserved: calendarDays.filter(day => day.reservations.length > 0).length,
-    outOfOrder: calendarDays.filter(day => day.isOutOfOrder).length,
+    // Calculate days from timeline start
+    const startOffset = differenceInDays(clippedStart, timelineStart);
+    const duration = differenceInDays(clippedEnd, clippedStart) + 1;
+
+    // Convert to pixels
+    const left = Math.max(0, startOffset * dayWidth);
+    const width = Math.max(dayWidth * 0.5, duration * dayWidth); // Minimum half-day width for visibility
+
+    return {
+      left: `${left}px`,
+      width: `${width}px`
+    };
+  };
+
+  // Get period color
+  const getPeriodColor = (type: 'booking' | 'reservation' | 'outOfOrder') => {
+    switch (type) {
+      case 'booking':
+        return 'bg-blue-500 hover:bg-blue-600';
+      case 'reservation':
+        return 'bg-yellow-500 hover:bg-yellow-600';
+      case 'outOfOrder':
+        return 'bg-red-300 hover:bg-red-400';
+      default:
+        return 'bg-gray-500';
+    }
+  };
+
+  // Get facility display name
+  const getFacilityName = (facility: any) => {
+    if (selectedFacilityType === "ROOMS") {
+      return `Room ${facility.roomNumber}`;
+    }
+    return facility.name;
   };
 
   // Navigation
-  const nextMonth = () => setCurrentDate(addMonths(currentDate, 1));
-  const prevMonth = () => setCurrentDate(subMonths(currentDate, 1));
+  const nextPeriod = () => setCurrentDate(addDays(currentDate, daysToShow));
+  const prevPeriod = () => setCurrentDate(addDays(currentDate, -daysToShow));
   const goToToday = () => setCurrentDate(new Date());
-
-  // Get status color for day
-  const getDayStatusColor = (day: CalendarDay): string => {
-    if (day.isPast) return "bg-gray-100 text-gray-400";
-    if (day.isOutOfOrder) return "bg-red-50 border-red-200 text-red-800";
-    if (day.bookings.length > 0) return "bg-blue-50 border-blue-200 text-blue-800";
-    if (day.reservations.length > 0) return "bg-orange-50 border-orange-200 text-orange-800";
-    return "bg-green-50 border-green-200 text-green-800";
-  };
-
-  // Get status icon for day
-  const getDayStatusIcon = (day: CalendarDay) => {
-    if (day.isPast) return <Clock className="h-3 w-3 text-gray-400" />;
-    if (day.isOutOfOrder) return <XCircle className="h-3 w-3 text-red-500" />;
-    if (day.bookings.length > 0) return <Users className="h-3 w-3 text-blue-500" />;
-    if (day.reservations.length > 0) return <AlertTriangle className="h-3 w-3 text-orange-500" />;
-    return <CheckCircle className="h-3 w-3 text-green-500" />;
-  };
-
-  // Get status text for day
-  const getDayStatusText = (day: CalendarDay): string => {
-    if (day.isPast) return "Past Date";
-    if (day.isOutOfOrder) return "Out of Service";
-    if (day.bookings.length > 0) return `${day.bookings.length} Booking${day.bookings.length > 1 ? 's' : ''}`;
-    if (day.reservations.length > 0) return `${day.reservations.length} Reservation${day.reservations.length > 1 ? 's' : ''}`;
-    return "Available";
-  };
 
   // Get unique room types for filter (only for rooms)
   const roomTypes = [...new Set(rooms.map(room => room.roomType.type))];
@@ -380,131 +363,15 @@ export default function FacilityCalendar() {
     setSelectedRoom(null);
   }, [selectedFacilityType]);
 
-  // Mobile Filters Component
-  const MobileFilters = () => (
-    <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
-      <SheetTrigger asChild>
-        <Button variant="outline" size="sm" className="lg:hidden">
-          <Menu className="h-4 w-4 mr-2" />
-          Filters
-        </Button>
-      </SheetTrigger>
-      <SheetContent side="bottom" className="h-[80vh]">
-        <SheetTitle className="flex items-center justify-between mb-6">
-          <span>Filters & Controls</span>
-          <Button variant="ghost" size="sm" onClick={() => setIsMobileFiltersOpen(false)}>
-            <X className="h-4 w-4" />
-          </Button>
-        </SheetTitle>
-        <div className="space-y-6">
-          {/* Facility Type Filter */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">Facility Type</label>
-            <Select value={selectedFacilityType} onValueChange={(value: FacilityType) => setSelectedFacilityType(value)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ROOMS">
-                  <div className="flex items-center gap-2">
-                    <Bed className="h-4 w-4" />
-                    <span>Rooms</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="HALLS">
-                  <div className="flex items-center gap-2">
-                    <Building className="h-4 w-4" />
-                    <span>Halls</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="LAWNS">
-                  <div className="flex items-center gap-2">
-                    <TreePalm className="h-4 w-4" />
-                    <span>Lawns</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="PHOTOSHOOTS">
-                  <div className="flex items-center gap-2">
-                    <Camera className="h-4 w-4" />
-                    <span>Photoshoots</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Room-specific filters (only show for rooms) */}
-          {selectedFacilityType === "ROOMS" && (
-            <>
-              <div>
-                <label className="text-sm font-medium mb-2 block">Room Type</label>
-                <Select value={selectedRoomType} onValueChange={setSelectedRoomType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Room Types" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Room Types</SelectItem>
-                    {roomTypes.map(type => (
-                      <SelectItem key={type} value={type}>{type}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium mb-2 block">Specific Room</label>
-                <Select
-                  value={selectedRoom || "ALL"}
-                  onValueChange={value => setSelectedRoom(value === "ALL" ? null : value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All Rooms" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Rooms</SelectItem>
-                    {rooms
-                      .filter(room => selectedRoomType === "ALL" || room.roomType.type === selectedRoomType)
-                      .map(room => (
-                        <SelectItem key={room.id} value={room.id.toString()}>
-                          Room {room.roomNumber} ({room.roomType.type})
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
-          )}
-
-          {/* Calendar Navigation */}
-          <div className="space-y-4 pt-4 border-t">
-            <label className="text-sm font-medium block">Calendar Navigation</label>
-            <div className="flex items-center justify-between">
-              <Button variant="outline" size="sm" onClick={prevMonth}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="sm" onClick={goToToday}>
-                Today
-              </Button>
-              <Button variant="outline" size="sm" onClick={nextMonth}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="text-center text-lg font-semibold">
-              {format(currentDate, "MMMM yyyy")}
-            </div>
-          </div>
-        </div>
-      </SheetContent>
-    </Sheet>
-  );
+  const facilities = getFacilitiesForTimeline();
+  const dayWidth = 80; // Width in pixels for each day column
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="flex-1 min-w-0">
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground truncate">
-            Facility Availability Calendar
+            Facility Timeline Calendar
           </h2>
           <p className="text-muted-foreground text-sm sm:text-base">
             View bookings, reservations, and maintenance schedules across all facilities
@@ -512,79 +379,12 @@ export default function FacilityCalendar() {
         </div>
       </div>
 
-      {/* Summary Statistics - MOVED TO TOP */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Card>
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1 sm:p-2 bg-green-100 rounded-lg">
-                <CheckCircle className="h-4 w-4 sm:h-6 sm:w-6 text-green-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Available</p>
-                <p className="text-lg sm:text-2xl font-bold">
-                  {stats.available}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1 sm:p-2 bg-blue-100 rounded-lg">
-                <Users className="h-4 w-4 sm:h-6 sm:w-6 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Booked</p>
-                <p className="text-lg sm:text-2xl font-bold">
-                  {stats.booked}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1 sm:p-2 bg-orange-100 rounded-lg">
-                <AlertTriangle className="h-4 w-4 sm:h-6 sm:w-6 text-orange-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Reserved</p>
-                <p className="text-lg sm:text-2xl font-bold">
-                  {stats.reserved}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-3 sm:p-4">
-            <div className="flex items-center gap-2 sm:gap-3">
-              <div className="p-1 sm:p-2 bg-red-100 rounded-lg">
-                <XCircle className="h-4 w-4 sm:h-6 sm:w-6 text-red-600" />
-              </div>
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-muted-foreground">Out of Service</p>
-                <p className="text-lg sm:text-2xl font-bold">
-                  {stats.outOfOrder}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Filters and Controls */}
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
-            {/* Desktop Filters */}
-            <div className="hidden lg:flex flex-col sm:flex-row gap-3 flex-1">
+            {/* Filters */}
+            <div className="flex flex-col sm:flex-row gap-3 flex-1 flex-wrap">
               {/* Facility Type Filter */}
               <Select value={selectedFacilityType} onValueChange={(value: FacilityType) => setSelectedFacilityType(value)}>
                 <SelectTrigger className="w-[180px]">
@@ -654,28 +454,37 @@ export default function FacilityCalendar() {
                   </Select>
                 </>
               )}
+
+              {/* Days to show filter */}
+              <Select value={daysToShow.toString()} onValueChange={(value) => setDaysToShow(parseInt(value))}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue placeholder="Days to show" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="7">7 Days</SelectItem>
+                  <SelectItem value="14">14 Days</SelectItem>
+                  <SelectItem value="30">30 Days</SelectItem>
+                  <SelectItem value="60">60 Days</SelectItem>
+                  <SelectItem value="90">90 Days</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            {/* Mobile Filters Trigger */}
-            <div className="lg:hidden w-full">
-              <MobileFilters />
-            </div>
-
-            {/* Calendar Navigation */}
+            {/* Navigation */}
             <div className="flex items-center gap-2 w-full lg:w-auto justify-between lg:justify-normal">
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={prevMonth}>
+                <Button variant="outline" size="sm" onClick={prevPeriod}>
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <Button variant="outline" size="sm" onClick={goToToday}>
                   Today
                 </Button>
-                <Button variant="outline" size="sm" onClick={nextMonth}>
+                <Button variant="outline" size="sm" onClick={nextPeriod}>
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
-              <div className="font-semibold min-w-[140px] text-center text-sm sm:text-base">
-                {format(currentDate, "MMM yyyy")}
+              <div className="font-semibold min-w-[200px] text-center text-sm sm:text-base">
+                {format(dateRange[0], "MMM d, yyyy")} - {format(dateRange[dateRange.length - 1], "MMM d, yyyy")}
               </div>
             </div>
           </div>
@@ -688,27 +497,19 @@ export default function FacilityCalendar() {
           <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
             <div className="flex flex-wrap gap-3 items-center text-xs sm:text-sm">
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                <span>Available</span>
+                <div className="w-8 h-3 rounded bg-blue-500"></div>
+                <span>Bookings</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                <span>Booked</span>
+                <div className="w-8 h-3 rounded bg-yellow-500"></div>
+                <span>Reservations</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-orange-500"></div>
-                <span>Reserved</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                <div className="w-8 h-3 rounded bg-red-300"></div>
                 <span>Out of Service</span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-gray-400"></div>
-                <span>Past Date</span>
-              </div>
             </div>
-            <Badge variant="outline" className="flex items-center gap-2 mt-2 sm:mt-0">
+            <Badge variant="outline" className="flex items-center gap-2">
               {getFacilityTypeIcon(selectedFacilityType)}
               {getFacilityTypeName(selectedFacilityType)}
             </Badge>
@@ -716,9 +517,9 @@ export default function FacilityCalendar() {
         </CardContent>
       </Card>
 
-      {/* Calendar Grid */}
+      {/* Timeline View */}
       <Card>
-        <CardContent className="p-3 sm:p-6">
+        <CardContent className="p-0">
           {isLoading ? (
             <div className="flex justify-center items-center py-12">
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -726,352 +527,246 @@ export default function FacilityCalendar() {
                 Loading {getFacilityTypeName(selectedFacilityType).toLowerCase()} data...
               </div>
             </div>
+          ) : facilities.length === 0 ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="text-muted-foreground">
+                No {getFacilityTypeName(selectedFacilityType).toLowerCase()} found matching the filters
+              </div>
+            </div>
           ) : (
-            <>
-              {/* Day Headers */}
-              <div className="grid grid-cols-7 gap-1 mb-3 sm:mb-4">
-                {["S", "M", "T", "W", "T", "F", "S"].map(day => (
-                  <div key={day} className="text-center font-medium text-xs sm:text-sm text-muted-foreground py-1 sm:py-2">
-                    {day}
+            <div className="overflow-x-auto">
+              <div className="min-w-full">
+                {/* Header Row - Dates */}
+                <div className="flex border-b bg-muted/50 sticky top-0 z-10">
+                  {/* Empty cell for facility names column */}
+                  <div className="w-48 flex-shrink-0 border-r p-2 font-semibold text-sm bg-muted/80">
+                    Facility
                   </div>
-                ))}
-              </div>
+                  {/* Date columns */}
+                  <div className="flex">
+                    {dateRange.map((date, index) => (
+                      <div
+                        key={index}
+                        className={cn(
+                          "flex-shrink-0 border-r p-2 text-center text-xs font-medium items-center justify-center",
+                          isSameDay(date, new Date()) && "bg-blue-50"
+                        )}
+                        style={{ width: `${dayWidth}px` }}
+                      >
+                        <div>{format(date, "MMM d")}</div>
+                        <div className="text-[10px] text-muted-foreground">{format(date, "EEE")}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-              {/* Calendar Days */}
-              <div className="grid grid-cols-7 gap-1">
-                {calendarDays.map((day, index) => (
-                  <TooltipProvider key={index}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <div
-                          className={cn(
-                            "min-h-[60px] sm:min-h-[80px] lg:min-h-[100px] p-1 sm:p-2 border rounded-lg cursor-pointer transition-all hover:shadow-md text-xs sm:text-sm",
-                            getDayStatusColor(day),
-                            day.isToday && "ring-1 sm:ring-2 ring-blue-500 ring-opacity-50"
-                          )}
-                          onClick={() => setSelectedDay(day)}
-                        >
-                          <div className="flex justify-between items-start mb-0.5 sm:mb-1">
-                            <span className={cn(
-                              "font-medium",
-                              day.isToday && "text-blue-600 font-bold"
-                            )}>
-                              {format(day.date, "d")}
-                            </span>
-                            <div className="scale-75 sm:scale-100">
-                              {getDayStatusIcon(day)}
-                            </div>
-                          </div>
+                {/* Facility Rows */}
+                <div>
+                  {facilities.map((facility: any) => {
+                    const periods = getPeriodsForFacility(facility);
 
-                          {/* Day Content */}
-                          <div className="space-y-0.5 sm:space-y-1">
-                            {/* Bookings */}
-                            {day.bookings.slice(0, 1).map((booking, idx) => (
-                              <div key={idx} className="bg-blue-100 text-blue-800 px-1 py-0.5 rounded truncate text-[10px] sm:text-xs">
-                                {selectedFacilityType === "ROOMS" ? "🏨" :
-                                  selectedFacilityType === "HALLS" ? "🏛️" :
-                                    selectedFacilityType === "LAWNS" ? "🌿" : "📸"}
-                                <span className="hidden sm:inline"> {booking.memberName || booking.guestName}</span>
-                              </div>
-                            ))}
-
-                            {/* Reservations */}
-                            {day.reservations.slice(0, 1).map((reservation, idx) => (
-                              <div key={idx} className="bg-orange-100 text-orange-800 px-1 py-0.5 rounded truncate text-[10px] sm:text-xs">
-                                📋<span className="hidden sm:inline"> {reservation.admin?.name || 'Admin'}</span>
-                              </div>
-                            ))}
-
-                            {/* Out of Service - Show specific facilities */}
-                            {day.outOfOrderInfo.slice(0, 1).map((info, idx) => (
-                              <div key={idx} className="bg-red-100 text-red-800 px-1 py-0.5 rounded truncate text-[10px] sm:text-xs">
-                                🔧<span className="hidden sm:inline"> {info.facilityName}</span>
-                              </div>
-                            ))}
-
-                            {/* Count badges for overflow */}
-                            {(day.bookings.length > 1 || day.reservations.length > 1 || day.outOfOrderInfo.length > 1) && (
-                              <div className="flex gap-0.5">
-                                {day.bookings.length > 1 && (
-                                  <Badge variant="secondary" className="h-3 text-[8px] sm:text-xs px-1">
-                                    +{day.bookings.length - 1}
-                                  </Badge>
-                                )}
-                                {day.reservations.length > 1 && (
-                                  <Badge variant="secondary" className="h-3 text-[8px] sm:text-xs px-1">
-                                    +{day.reservations.length - 1}
-                                  </Badge>
-                                )}
-                                {day.outOfOrderInfo.length > 1 && (
-                                  <Badge variant="secondary" className="h-3 text-[8px] sm:text-xs px-1 bg-red-100 text-red-800">
-                                    +{day.outOfOrderInfo.length - 1}
-                                  </Badge>
-                                )}
+                    return (
+                      <div key={facility.id} className="flex border-b hover:bg-muted/30 transition-colors">
+                        {/* Facility Name Column */}
+                        <div className="w-48 flex-shrink-0 border-r p-3 font-medium text-sm flex items-center">
+                          <div className="truncate">
+                            {getFacilityName(facility)}
+                            {selectedFacilityType === "ROOMS" && (
+                              <div className="text-xs text-muted-foreground">
+                                {facility.roomType.type}
                               </div>
                             )}
                           </div>
                         </div>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-xs sm:max-w-sm text-xs sm:text-sm">
-                        <div className="space-y-2">
-                          <div className="font-semibold">
-                            {format(day.date, "EEEE, MMMM d, yyyy")}
-                            {day.isToday && <Badge className="ml-2">Today</Badge>}
+
+                        {/* Timeline Column */}
+                        <div className="relative flex-1" style={{ minHeight: '60px' }}>
+                          {/* Date grid background */}
+                          <div className="absolute inset-0 flex">
+                            {dateRange.map((date, index) => (
+                              <div
+                                key={index}
+                                className={cn(
+                                  "flex-shrink-0 border-r",
+                                  isSameDay(date, new Date()) && "bg-blue-50/50"
+                                )}
+                                style={{ width: `${dayWidth}px` }}
+                              />
+                            ))}
                           </div>
 
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              {getDayStatusIcon(day)}
-                              <span>{getDayStatusText(day)}</span>
+                          {/* Period bars */}
+                          <div className="absolute inset-0 flex items-center justify-center px-1 py-2">
+                            <div className="relative w-full">
+                              {periods.map((period) => {
+                                const style = calculatePeriodStyle(period, dateRange[0], dateRange[dateRange.length - 1], dayWidth);
+                                return (
+                                  <TooltipProvider key={period.id}>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <div
+                                          className={cn(
+                                            "absolute h-6 rounded cursor-pointer transition-all mb-1",
+                                            getPeriodColor(period.type)
+                                          )}
+                                          style={{
+                                            ...style,
+                                            top: period.type === 'booking' ? '0px' :
+                                              period.type === 'reservation' ? '8px' : '16px'
+                                          }}
+                                          onClick={() => setSelectedPeriod({ period, facility })}
+                                        >
+                                          <div className="text-white text-[10px] px-1 truncate leading-6">
+                                            {period.type === 'booking' && (period.data.memberName || period.data.guestName)}
+                                            {period.type === 'reservation' && (period.data.admin?.name || 'Reserved')}
+                                            {period.type === 'outOfOrder' && 'Out of Service'}
+                                          </div>
+                                        </div>
+                                      </TooltipTrigger>
+                                      <TooltipContent className="max-w-xs text-xs">
+                                        <div className="space-y-1">
+                                          <div className="font-semibold capitalize">{period.type}</div>
+                                          {period.type === 'booking' && (
+                                            <>
+                                              <div>Guest: {period.data.memberName || period.data.guestName}</div>
+                                              {selectedFacilityType === "ROOMS" && (
+                                                <div>
+                                                  {format(period.startDate, "MMM d")} - {format(period.endDate, "MMM d, yyyy")}
+                                                </div>
+                                              )}
+                                              {period.data.totalPrice && (
+                                                <div>PKR {parseInt(period.data.totalPrice).toLocaleString()}</div>
+                                              )}
+                                            </>
+                                          )}
+                                          {period.type === 'reservation' && (
+                                            <>
+                                              <div>By: {period.data.admin?.name || 'Admin'}</div>
+                                              <div>
+                                                {format(period.startDate, "MMM d")} - {format(period.endDate, "MMM d, yyyy")}
+                                              </div>
+                                            </>
+                                          )}
+                                          {period.type === 'outOfOrder' && (
+                                            <>
+                                              <div>Reason: {period.data.reason}</div>
+                                              <div>
+                                                {format(period.startDate, "MMM d")} - {format(period.endDate, "MMM d, yyyy")}
+                                              </div>
+                                            </>
+                                          )}
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                );
+                              })}
                             </div>
-
-                            {day.bookings.length > 0 && (
-                              <div>
-                                <div className="font-medium text-blue-700">Bookings:</div>
-                                {day.bookings.map((booking, idx) => (
-                                  <div key={idx} className="ml-2">
-                                    • {booking.memberName || booking.guestName}
-                                    {booking.totalPrice && ` (PKR ${booking.totalPrice.toLocaleString()})`}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {day.reservations.length > 0 && (
-                              <div>
-                                <div className="font-medium text-orange-700">Reservations:</div>
-                                {day.reservations.map((reservation, idx) => (
-                                  <div key={idx} className="ml-2">
-                                    • By {reservation.admin?.name || 'Admin'}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {day.outOfOrderInfo.length > 0 && (
-                              <div>
-                                <div className="font-medium text-red-700">Out of Service:</div>
-                                {day.outOfOrderInfo.map((info, idx) => (
-                                  <div key={idx} className="ml-2">
-                                    • {info.facilityName}: {info.reason}
-                                    <div className="text-xs text-muted-foreground">
-                                      {format(new Date(info.from), "MMM d")} - {format(new Date(info.to), "MMM d, yyyy")}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
                           </div>
                         </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ))}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </>
+            </div>
           )}
         </CardContent>
       </Card>
-      {/* Day Details Modal */}
-      <Dialog open={!!selectedDay} onOpenChange={() => setSelectedDay(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+
+      {/* Period Details Modal */}
+      <Dialog open={!!selectedPeriod} onOpenChange={() => setSelectedPeriod(null)}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 capitalize">
               <CalendarIcon className="h-5 w-5" />
-              {selectedDay && format(selectedDay.date, "EEEE, MMMM d, yyyy")}
-              {selectedDay?.isToday && (
-                <Badge variant="default" className="ml-2">
-                  Today
-                </Badge>
-              )}
+              {selectedPeriod?.period.type} Details
             </DialogTitle>
           </DialogHeader>
 
-          {selectedDay && (
-            <div className="space-y-6">
-              {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className={selectedDay.bookings.length > 0 ? "border-blue-200 bg-blue-50" : ""}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-muted-foreground">Bookings</p>
-                        <p className="text-2xl font-bold">{selectedDay.bookings.length}</p>
-                      </div>
-                      <Users className={`h-8 w-8 ${selectedDay.bookings.length > 0 ? "text-blue-600" : "text-muted-foreground"}`} />
+          {selectedPeriod && (
+            <div className="space-y-4">
+              <Card>
+                <CardContent className="p-4 space-y-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Facility</p>
+                      <p className="text-lg font-semibold">{getFacilityName(selectedPeriod.facility)}</p>
                     </div>
-                  </CardContent>
-                </Card>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        selectedPeriod.period.type === 'booking' && "bg-blue-100 text-blue-800",
+                        selectedPeriod.period.type === 'reservation' && "bg-yellow-100 text-yellow-800",
+                        selectedPeriod.period.type === 'outOfOrder' && "bg-red-100 text-red-800"
+                      )}
+                    >
+                      {selectedPeriod.period.type}
+                    </Badge>
+                  </div>
 
-                <Card className={selectedDay.reservations.length > 0 ? "border-orange-200 bg-orange-50" : ""}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Period</p>
+                    <p className="text-base">
+                      {format(selectedPeriod.period.startDate, "MMM d, yyyy")} - {format(selectedPeriod.period.endDate, "MMM d, yyyy")}
+                    </p>
+                  </div>
+
+                  {selectedPeriod.period.type === 'booking' && (
+                    <>
                       <div>
-                        <p className="text-sm font-medium text-muted-foreground">Reservations</p>
-                        <p className="text-2xl font-bold">{selectedDay.reservations.length}</p>
+                        <p className="text-sm font-medium text-muted-foreground">Guest Name</p>
+                        <p className="text-base">{selectedPeriod.period.data.memberName || selectedPeriod.period.data.guestName}</p>
                       </div>
-                      <AlertTriangle className={`h-8 w-8 ${selectedDay.reservations.length > 0 ? "text-orange-600" : "text-muted-foreground"}`} />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className={selectedDay.isOutOfOrder ? "border-red-200 bg-red-50" : ""}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-muted-foreground">Out of Service</p>
-                        <p className="text-2xl font-bold">{selectedDay.outOfOrderInfo.length}</p>
-                      </div>
-                      <XCircle className={`h-8 w-8 ${selectedDay.isOutOfOrder ? "text-red-600" : "text-muted-foreground"}`} />
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Bookings Section */}
-              {selectedDay.bookings.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-blue-700">
-                      <Users className="h-5 w-5" />
-                      Bookings ({selectedDay.bookings.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {selectedDay.bookings.map((booking, index) => (
-                        <div key={index} className="flex items-start justify-between p-3 border border-blue-200 rounded-lg bg-blue-50">
-                          <div className="space-y-1">
-                            <div className="font-medium">
-                              {booking.memberName || `Member ${booking.Membership_No || 'Unknown'}`}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {selectedFacilityType === "ROOMS" ? (
-                                <>
-                                  Check-in: {format(new Date(booking.checkIn), "MMM d, yyyy")} •
-                                  Check-out: {format(new Date(booking.checkOut), "MMM d, yyyy")}
-                                </>
-                              ) : (
-                                `Booked for ${format(new Date(booking.bookingDate || booking.createdAt), "MMM d, yyyy")}`
-                              )}
-                            </div>
-                            {booking.totalPrice && (
-                              <div className="text-sm font-medium">
-                                PKR {parseInt(booking.totalPrice).toLocaleString()}
-                              </div>
-                            )}
-                          </div>
+                      {selectedPeriod.period.data.totalPrice && (
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Total Price</p>
+                          <p className="text-base font-semibold">PKR {parseInt(selectedPeriod.period.data.totalPrice).toLocaleString()}</p>
+                        </div>
+                      )}
+                      {selectedPeriod.period.data.paymentStatus && (
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Payment Status</p>
                           <Badge
                             variant={
-                              booking.paymentStatus === "PAID" ? "default" :
-                                booking.paymentStatus === "UNPAID" ? "destructive" : "secondary"
+                              selectedPeriod.period.data.paymentStatus === "PAID" ? "default" :
+                                selectedPeriod.period.data.paymentStatus === "UNPAID" ? "destructive" : "secondary"
                             }
                             className={
-                              booking.paymentStatus === "PAID" ? "bg-green-100 text-green-800" :
-                                booking.paymentStatus === "UNPAID" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"
+                              selectedPeriod.period.data.paymentStatus === "PAID" ? "bg-green-100 text-green-800" :
+                                selectedPeriod.period.data.paymentStatus === "UNPAID" ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800"
                             }
                           >
-                            {booking.paymentStatus === "PAID" ? "Paid" :
-                              booking.paymentStatus === "UNPAID" ? "Unpaid" :
-                                booking.paymentStatus === "HALF_PAID" ? "Half Paid" : booking.paymentStatus}
+                            {selectedPeriod.period.data.paymentStatus}
                           </Badge>
                         </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                      )}
+                    </>
+                  )}
 
-              {/* Reservations Section */}
-              {selectedDay.reservations.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-orange-700">
-                      <AlertTriangle className="h-5 w-5" />
-                      Reservations ({selectedDay.reservations.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {selectedDay.reservations.map((reservation, index) => (
-                        <div key={index} className="flex items-start justify-between p-3 border border-orange-200 rounded-lg bg-orange-50">
-                          <div className="space-y-1">
-                            <div className="font-medium">
-                              Reserved by {reservation.admin?.name || 'Admin'}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              From: {format(new Date(reservation.reservedFrom), "MMM d, yyyy")} •
-                              To: {format(new Date(reservation.reservedTo), "MMM d, yyyy")}
-                            </div>
-                            {reservation.admin?.email && (
-                              <div className="text-sm text-muted-foreground">
-                                {reservation.admin.email}
-                              </div>
-                            )}
-                          </div>
-                          <Badge variant="outline" className="bg-orange-100 text-orange-800">
-                            Admin Reservation
-                          </Badge>
+                  {selectedPeriod.period.type === 'reservation' && (
+                    <>
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Reserved By</p>
+                        <p className="text-base">{selectedPeriod.period.data.admin?.name || 'Admin'}</p>
+                      </div>
+                      {selectedPeriod.period.data.admin?.email && (
+                        <div>
+                          <p className="text-sm font-medium text-muted-foreground">Email</p>
+                          <p className="text-base">{selectedPeriod.period.data.admin.email}</p>
                         </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                      )}
+                    </>
+                  )}
 
-              {/* Out of Service Section */}
-              {selectedDay.isOutOfOrder && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-red-700">
-                      <XCircle className="h-5 w-5" />
-                      Out of Service Facilities ({selectedDay.outOfOrderInfo.length})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {selectedDay.outOfOrderInfo.map((info, index) => (
-                        <div key={index} className="p-3 border border-red-200 rounded-lg bg-red-50">
-                          <div className="font-medium text-red-800">
-                            {info.facilityName}
-                          </div>
-                          <div className="text-sm text-red-700 mt-1">
-                            {info.reason}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-2">
-                            Maintenance Period: {format(new Date(info.from), "MMM d, yyyy")} - {format(new Date(info.to), "MMM d, yyyy")}
-                          </div>
-                        </div>
-                      ))}
+                  {selectedPeriod.period.type === 'outOfOrder' && (
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Reason</p>
+                      <p className="text-base">{selectedPeriod.period.data.reason}</p>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* No Activities Message */}
-              {selectedDay.bookings.length === 0 && selectedDay.reservations.length === 0 && !selectedDay.isOutOfOrder && (
-                <Card>
-                  <CardContent className="p-6 text-center">
-                    <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium mb-2">No Activities</h3>
-                    <p className="text-muted-foreground">
-                      There are no bookings, reservations, or maintenance scheduled for this date.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Past Date Warning */}
-              {selectedDay.isPast && (
-                <Card className="border-yellow-200 bg-yellow-50">
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 text-yellow-800">
-                      <Clock className="h-4 w-4" />
-                      <span className="text-sm font-medium">This is a past date</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+                  )}
+                </CardContent>
+              </Card>
             </div>
           )}
         </DialogContent>

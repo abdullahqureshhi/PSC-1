@@ -36,6 +36,18 @@ export class AffiliationService {
     });
   }
 
+  async getAffiliatedClubsActive() {
+    return await this.prismaService.affiliatedClub.findMany({
+      where: { isActive: true },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        requests: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+  }
+
   async getAffiliatedClubById(id: number) {
     const club = await this.prismaService.affiliatedClub.findUnique({
       where: { id: Number(id) },
