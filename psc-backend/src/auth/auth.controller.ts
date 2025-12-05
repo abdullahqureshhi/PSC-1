@@ -147,8 +147,20 @@ export class AuthController {
     async userWho(
         @Req() req: { user: { id: string | undefined; role: string | undefined, permissions: any[] } },
     ) {
-        return { id: req.user?.id, role: req.user?.role, permissions: req.user?.permissions };
-    }
+        if(req?.user?.role != RolesEnum.ADMIN){
+            if(req?.user?.role != RolesEnum.SUPER_ADMIN){
+
+                const activeUser = await this.authService.checkActive(req.user?.id!);
+                if (!activeUser) {
+                    throw new HttpException(
+                        'User is not active. Please contact support.',
+                        HttpStatus.FORBIDDEN,
+                    );
+                }
+            }
+        }
+        return { id: req.user?.id, role: req.user?.role, permissions: req.user?.permissions };
+    }
 
     // members
 

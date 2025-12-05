@@ -174,6 +174,9 @@ export class AuthService {
         }
         return member;
     }
+    async checkActive(Membership_No: string){
+        return await this.prisma.member.findFirst({where: {Membership_No, Status: "ACTIVE"}})
+    }
 
     async sendOTP(to: string, subject: string, body: string) {
         return await this.mailer.sendMail(to, subject, body);
