@@ -71,7 +71,7 @@ export class AffiliationController {
     @UseGuards(JwtAccGuard)
     @Post('requests')
     async createRequest(@Body() body: any, @Req() req: {user: {id: string}}) {
-        return await this.affiliationService.createRequest({...body, membershipNo: req.user.id});
+        return await this.affiliationService.createRequest({...body, membershipNo: req.user.id})
     }
 
     @Put('requests/status')
